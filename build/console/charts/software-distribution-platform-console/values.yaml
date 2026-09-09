@@ -1,0 +1,50 @@
+basic:
+  # k8s 资源名统一用短名（镜像名才是全名）
+  component: console
+  replicaCount: 1
+  update_versions: 0.0.1
+
+service:
+  # nginx 主配置 443 ssl 监听（Chart 模板 ConfigMap 注入 /etc/nginx/nginx.conf）
+  containerPort: 443
+  externPort: 443
+
+image:
+  imageAddr: localhost:5000/software-distribution-platform-console:v0.0.1
+  pullPolicy: Always
+  imagePullSecrets: default-secret
+
+resources:
+  resources_cpu_requests: 50m
+  resources_cpu_limits: 200m
+  resources_mem_requests: 64Mi
+  resources_mem_limits: 256Mi
+
+# TLS 证书 secret（443 ssl 用，由部署脚本预置到集群，见 deploy-local.sh：
+#   certs/server.{crt,key} + certs/ca.crt 自签生成；items 映射到 /etc/nginx/ssl）
+cert:
+  secretName: console-tls
+
+# ingress（nginx ingress-controller 终结外部 HTTPS，backend-protocol HTTPS 转发到本 svc 443）。
+# host 留空 = 匹配所有 Host（本地直接 https://localhost:8443 访问）；上真实环境填域名。
+ingress:
+  host: ""
+  tlsSecretName: console-ingress-tls
+
+# hub 反代目标（nginx ConfigMap 中 upstream，集群内 svc 名须为 hub）
+api:
+  hubService: hub
+  hubPort: "8080"
+  # 前端 API baseURL（运行时注入 config.js）。留空时前端兜底 '/api/v1'
+  # （浏览器 -> ingress /api -> console nginx -> hub），一般无需修改。
+  baseUrl: ""
+
+# 前端认证配置（chart values -> ConfigMap -> config.js，改这里 helm upgrade 即可，无需重建镜像）。
+# authDisabled=true：跳过 Keycloak 直接进入已登录态（本地无 Keycloak 时用）。
+# 接入真实 Keycloak：authDisabled=false 并填全 keycloakIssuerUrl/ClientId/RedirectUri，
+# clientId 需与 hub 的 KEYCLOAK_CLIENT_ID 一致（hub 校验 token azp）。
+auth:
+  authDisabled: "true"
+  keycloakIssuerUrl: ""
+  keycloakClientId: ""
+  keycloakRedirectUri: ""

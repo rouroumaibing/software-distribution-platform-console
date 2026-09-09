@@ -1,0 +1,4 @@
+apiVersion: v2
+name: software-distribution-platform-console
+description: software-distribution-platform-console charts
+version: 0.0.1

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Software Distribution Platform</title>
+    <!-- 运行时配置：容器启动时 envsubst 生成（见 build/console/images/config.js.template）；
+         dev 模式下 404 不影响，auth.ts 会回退到 import.meta.env -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

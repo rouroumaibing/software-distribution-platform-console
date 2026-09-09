@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.basic.component }}
+  labels:
+    app: {{ .Values.basic.component }}
+    version: v1
+spec:
+  replicas: {{ .Values.basic.replicaCount }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: {{ .Values.basic.component }}
+      version: v1
+  template:
+    metadata:
+      annotations: {}
+      labels:
+        app: {{ .Values.basic.component }}
+        version: v1
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecrets }}
+      containers:
+        - name: console
+          image: {{ .Values.image.imageAddr }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /
+              port: 443
+              scheme: HTTPS
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /
+              port: 443
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: {{ .Values.resources.resources_cpu_requests }}
+              memory: {{ .Values.resources.resources_mem_requests }}
+            limits:
+              cpu: {{ .Values.resources.resources_cpu_limits }}
+              memory: {{ .Values.resources.resources_mem_limits }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.service.containerPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: console-config
+              mountPath: /usr/share/nginx/html/config.js
+              subPath: config.js
+              readOnly: true
+            - name: cert
+              mountPath: /etc/nginx/ssl
+              readOnly: true
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: console-nginx-config
+        - name: console-config
+          configMap:
+            name: console-config
+        - name: cert
+          secret:
+            secretName: {{ .Values.cert.secretName }}
+            defaultMode: 384
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: server.crt
+                path: server.crt
+              - key: server.key
+                path: server.key
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  progressDeadlineSeconds: 600

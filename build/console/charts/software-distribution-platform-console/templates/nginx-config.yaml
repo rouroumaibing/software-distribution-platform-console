@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: console-nginx-config
+  labels:
+    app: {{ .Values.basic.component }}
+data:
+  # 完整主配置（对齐参考工程 old/go-devops/console：ConfigMap 整份挂载
+  # /etc/nginx/nginx.conf，镜像保持纯静态、不含任何站点配置）。
+  # 差异点（SDP 适配）：新增 /api 反代到集群内 hub svc；
+  #   443 ssl 证书来自 chart 预置的 server-secret（/etc/nginx/ssl）。
+  nginx.conf: |
+    user  nginx;
+    worker_processes  auto;
+    error_log  /var/log/nginx/error.log notice;
+    pid        /var/run/nginx.pid;
+    events {
+        worker_connections  1024;
+    }
+
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+
+        charset       utf-8;
+
+        log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                          '$status $body_bytes_sent "$http_referer" '
+                          '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log  /var/log/nginx/access.log  main;
+        sendfile        on;
+        keepalive_timeout  65;
+        gzip on;
+        gzip_static on;
+        gzip_buffers 4 16k;
+        gzip_http_version 1.1;
+        gzip_comp_level 5;
+        gzip_types text/plain application/javascript text/css application/xml text/javascript application/x-httpd-php image/jpeg image/gif image/png;
+        gzip_vary on;
+
+        # hub 反代目标（集群内 svc，chart values gateway 同命名空间）
+        upstream hub_backend {
+            server {{ .Values.api.hubService }}:{{ .Values.api.hubPort }};
+        }
+
+        server {
+            listen       443 ssl;
+            server_name  _;
+
+            ssl_certificate     /etc/nginx/ssl/server.crt;
+            ssl_certificate_key /etc/nginx/ssl/server.key;
+
+            location / {
+                root   /usr/share/nginx/html;
+                index  index.html;
+                try_files $uri $uri/ /index.html;
+                add_header X-Content-Type-Options 'nosniff';
+                add_header X-XSS-Protection '1; mode=block';
+            }
+
+            # SDP：/api 反代到 hub（含 ws 升级头，供 gateway/日志流）
+            location /api/ {
+                proxy_pass http://hub_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_read_timeout 300s;
+            }
+        }
+
+        server {
+            listen       80;
+            server_name  _;
+            return 301 https://$host$request_uri;
+        }
+    }
