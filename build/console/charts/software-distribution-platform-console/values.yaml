@@ -20,13 +20,16 @@ resources:
   resources_mem_requests: 64Mi
   resources_mem_limits: 256Mi
 
-# TLS 证书 secret（443 ssl 用，由部署脚本预置到集群，见 deploy-local.sh：
-#   certs/server.{crt,key} + certs/ca.crt 自签生成；items 映射到 /etc/nginx/ssl）
+# TLS 证书 secret（443 ssl 用）：chart 只**引用** secret 名，容器内挂到 /etc/nginx/ssl。
+# 生产：由运维**手工创建**该 secret（证书来自你自己的 PKI），部署流程不生成任何私钥——同 old/go-devops。
+# 本地：缺失时由仓内脚本 scripts/gen-certs.sh 自签兜底（产物 console/output/certs，随 pnpm clean 回收）。
+# 必需 key：ca.crt / server.crt / server.key（items 见 templates/deployment.yaml）。
 cert:
   secretName: console-tls
 
 # ingress（nginx ingress-controller 终结外部 HTTPS，backend-protocol HTTPS 转发到本 svc 443）。
 # host 留空 = 匹配所有 Host（本地直接 https://localhost:8443 访问）；上真实环境填域名。
+# tlsSecretName 同 cert.secretName：生产由运维手工创建（type kubernetes.io/tls，tls.crt/tls.key）。
 ingress:
   host: ""
   tlsSecretName: console-ingress-tls

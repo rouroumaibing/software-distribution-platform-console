@@ -9,14 +9,13 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
+    "test:runcenter": "node scripts/runcenter-url-smoke.mjs",
     "clean": "bash scripts/clean.sh",
     "clean:deep": "bash scripts/clean.sh --deep",
     "package": "vite build",
     "image": "bash build/console/build.sh",
     "start:dev": "bash scripts/svc.sh start",
-    "stop:dev": "bash scripts/svc.sh stop",
-    "start:deploy": "bash ../deploy-local.sh",
-    "stop:deploy": "bash ../undeploy-local.sh"
+    "stop:dev": "bash scripts/svc.sh stop"
   },
   "dependencies": {
     "axios": "^1.19.0",

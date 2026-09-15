@@ -1,4 +1,6 @@
 # ===== 依赖 / 构建产物（生成物，应清理） =====
+# 注意：2026-09-15 起 vite 产物落 output/dist、缓存落 output/.vite（产物统一在 output/ 下），
+# 这里的 dist/ .vite/ 是历史位置，保留以防旧检出残留。
 node_modules/
 dist/
 .vite/

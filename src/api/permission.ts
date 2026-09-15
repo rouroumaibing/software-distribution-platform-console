@@ -10,6 +10,9 @@ export interface User {
   createdAt: string
 }
 
+// V1 legacy roles table (Viewer/Editor/Admin) — retained for the migration
+// window so legacy role-bindings can still be displayed. New grants use the
+// §7 ComponentRole model below.
 export interface Role {
   id: string
   orgId?: string
@@ -18,11 +21,34 @@ export interface Role {
   isSystem: boolean
 }
 
+// §7 component-scoped role (component_roles). This is what the binding picker
+// offers going forward.
+export interface ComponentRole {
+  id: string
+  orgId?: string | null
+  name: string
+  description?: string
+  actions: string[]
+  isSystem: boolean
+}
+
+// §7 subject model (authoritative as of P3):
+//   - subjectType : 'user' | 'group'
+//   - subjectId   : user id (uuid) | Keycloak group name
+//   - componentRoleId : the granted component_roles role
+// V1 legacy fields (userId/roleId) may still appear on rows migrated from the
+// old single-roles model; the UI falls back to them for display only.
 export interface ComponentRoleBinding {
   id: string
   componentId: string
-  userId: string
-  roleId: string
+  orgId?: string | null
+  subjectType?: 'user' | 'group'
+  subjectId?: string
+  componentRoleId?: string
+  // V1 legacy (read-only, present on old rows)
+  userId?: string
+  roleId?: string
+  grantedBy?: string
   grantedAt: string
 }
 
@@ -34,13 +60,23 @@ export const permissionApi = {
     list: (p?: Pagination) => listPaged<User>('/users', p),
   },
 
-  // 角色是种子数据(Viewer/Editor/Admin),只读,没有增删改接口。
+  // V1 角色是种子数据(Viewer/Editor/Admin),只读,没有增删改接口。
   roles: {
     list: () => http.get<{ data: Role[] }>('/roles').then((r) => r.data.data),
   },
 
+  // §7 组件角色(component_roles):内置 viewer/editor/approver/admin + 组织自定义。
+  // 绑定选择器使用这一组而不是 V1 roles。
+  componentRoles: {
+    list: () => http.get<{ data: ComponentRole[] }>('/component-roles').then((r) => r.data.data),
+  },
+
   bindings: {
-    create: (componentId: string, payload: { userId: string; roleId: string }) =>
+    // §7 写路径:subjectType + subjectId + componentRoleId。
+    create: (
+      componentId: string,
+      payload: { subjectType: 'user' | 'group'; subjectId: string; componentRoleId: string },
+    ) =>
       http
         .post<{ data: ComponentRoleBinding }>(`/components/${componentId}/role-bindings`, payload)
         .then((r) => r.data.data),

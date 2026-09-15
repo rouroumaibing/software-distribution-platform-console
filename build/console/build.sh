@@ -1,7 +1,8 @@
 #!/bin/bash
 # 构建 software-distribution-platform-console（复刻 old/go-devops build.sh 打包结构，前端适配）：
-#   pnpm 构建 dist -> images/ dist tar.gz -> nginx 运行时镜像 + docker save
+#   pnpm 构建 output/dist -> images/ dist tar.gz -> nginx 运行时镜像 + docker save
 #   charts/ chart 源目录 -> 打 tgz；最终 pack 成 <component>-<version>.tar.gz（charts + images 一起交付）
+#   生成物全部落 output/（vite 产物 output/dist 也在其中，见 vite.config.ts）——clean 即 rm -rf output
 # 用法: ./build.sh [version]    默认 v0.0.1
 #       ./build.sh clean        清理 output/
 set -e
@@ -33,8 +34,10 @@ function build_console(){
     pnpm install --frozen-lockfile
     pnpm build
     popd > /dev/null
-    if [ -f "${PROJECT_ROOT}/dist/index.html" ]; then
-        tar -zcvf "${OUTPUTDIR}/images/console-dist.tar.gz" -C "${PROJECT_ROOT}/dist" .
+    # vite 产物落 output/dist（见 vite.config.ts 的 build.outDir），与交付产物同根，
+    # 因此整条链的生成物都在 output/ 内，clean 只需 rm -rf output。
+    if [ -f "${OUTPUTDIR}/dist/index.html" ]; then
+        tar -zcvf "${OUTPUTDIR}/images/console-dist.tar.gz" -C "${OUTPUTDIR}/dist" .
         echo "${component} build successfully."
     else
         echo "${component} build failed."

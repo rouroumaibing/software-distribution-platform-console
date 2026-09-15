@@ -1,9 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
-// 路由表（IA v2，CONSOLE-LAYOUT §4 v2）：
-// 左侧菜单 4 项（总览/服务树/运行中心/平台管理）；
-// 组件详情 = /components/:id 全屏子路由 Tab（概览/配置/流水线/运行/发布/制品/环境/权限/日志）。
+// 路由表（IA v4，CONSOLE-UI重设计文档.md）：左侧菜单恒 5 项
+// （总览/服务树/运行中心 + 平台管理 2 项）；
+// 组件详情 = /components/:id 全屏子路由 Tab（概览/配置/流水线/运行/发布/制品/环境/权限/日志）；
+// 运行中心的 运行/流水线/发布 是同一页的三个视图，用 ?view= 承载而不是子路由（附 B N-13）。
 // 旧 flat 菜单路由（/pipelines /releases /artifacts /environments /permissions /logs）→ redirect。
 const router = createRouter({
   history: createWebHistory(),
@@ -41,7 +42,8 @@ const router = createRouter({
           ],
         },
 
-        // ---- 运行中心（唯一全局巡视入口）----
+        // ---- 运行中心（唯一全局巡视入口，含 运行/流水线/发布 三视图）----
+        // 三视图共用一个路由，切面靠 ?view= 承载（CONSOLE-UI重设计文档.md 附 B N-13）。
         { path: 'runs', component: () => import('@/views/RunCenterView.vue'), meta: { title: '运行中心' } },
 
         // ---- 下钻路由（保持不变）----
@@ -55,9 +57,12 @@ const router = createRouter({
         { path: 'admin/clusters', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'clusters' }, meta: { title: '集群' } },
 
         // ---- 旧 flat 菜单路由 → redirect（deep link 兼容）----
+        // 「流水线 / 发布」v4 起不再是顶层页，降为运行中心的两个视图 —— 所以旧链
+        // 要直接落到对应视图，而不是笼统地回 /runs（否则点「发布」旧链看到运行列表，
+        // 属静默语义漂移；附 B 硬约束 ⑤）。
         { path: 'components', redirect: '/service-tree' },
-        { path: 'pipelines', redirect: '/service-tree' },
-        { path: 'releases', redirect: '/runs' },
+        { path: 'pipelines', redirect: { path: '/runs', query: { view: 'pipelines' } } },
+        { path: 'releases', redirect: { path: '/runs', query: { view: 'releases' } } },
         { path: 'artifacts', redirect: '/service-tree' },
         { path: 'environments', redirect: '/admin/clusters' },
         { path: 'permissions', redirect: '/admin/permissions' },

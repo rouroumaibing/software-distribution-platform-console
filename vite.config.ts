@@ -9,6 +9,13 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  // 构建产物与构建缓存统一落在 output/ 下（与 `pnpm image` 的交付产物同根），
+  // 使「全部生成物」收敛到一个目录：`pnpm clean` 一条 rm -rf output 即清空。
+  // 对齐参考工程 old/go-devops/console/vite.config.ts 的 `outDir: './output/dist'`。
+  cacheDir: 'output/.vite',
+  build: {
+    outDir: 'output/dist',
+  },
   server: {
     port: 5173,
     proxy: {
