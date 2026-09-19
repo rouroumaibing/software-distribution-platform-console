@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 运行中心（IA v4；URL 形态裁决见 CONSOLE-UI重设计文档.md 附 B，N-13）。
+// 运行中心（IA v4.4；URL 形态裁决见 CONSOLE-UI-DESIGN.md 附 B，N-13）。
 //
-// 三视图共用一条 URL：/runs?view=runs|pipelines|releases（+ &phase= &page=），
-// 因为「运行 / 流水线 / 发布」是同一批数据的切面，不是子页面。
+// 两视图共用一条 URL：/runs?view=runs|releases（+ &phase= &page=），
+// 因为「运行 / 发布」是同一批数据的两个切面，不是子页面。
+// （「流水线」视图已于 v4.4 移除，其列表归属「组件详情 · 交付 · 流水线」。）
 //
 // 附 B B.6 的 5 条硬约束里，本文件负责 ①②③：
 //   ① 缺省归一化 —— view 缺省/非法即 replace 成规范形态，地址栏只有一种形状；
@@ -11,8 +12,9 @@
 //
 // 数据源（不臆想，按 hub 实际端点）：
 //   · 运行视图 → GET /api/v1/runs?page=&pageSize=&phase=（服务端过滤，已存在）
-//   · 流水线 / 发布视图 → hub 暂无全局聚合端点（附 A N-3），先用服务树索引前端聚合，
-//     见 useResourceMap.buildResourceIndex()。
+//   · 发布视图 → 仍走 GET /runs 扫描 + 按流水线 kind 前端聚合，见
+//     useResourceMap.buildResourceIndex()。hub 侧全局 GET /releases 已存在（附 A N-3），
+//     但 console 尚无对应 api 封装 —— 切过去是独立一条待办，不在本轮。
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -21,7 +23,6 @@ import { runApi, type PipelineRun } from '@/api/run'
 import {
   buildResourceIndex,
   emptyResourceIndex,
-  type PipelineRef,
   type ResourceIndex,
 } from '@/composables/useResourceMap'
 import {
@@ -33,13 +34,12 @@ import {
   sameQuery,
   type RunViewKey,
 } from '@/constants/runCenter'
-import { toast } from '@/utils/toast'
 
 const route = useRoute()
 const router = useRouter()
 
 const PAGE_SIZE = 20
-// 前端聚合视图（流水线 / 发布）一次拉取上限：N-3 全局端点落地前的过渡手段。
+// 发布视图（前端聚合）一次拉取上限：console 侧接上全局 /releases 前的过渡手段。
 const AGGREGATE_SCAN = 200
 
 const view = ref<RunViewKey>(DEFAULT_RUN_VIEW)
@@ -47,9 +47,7 @@ const phase = ref('')
 const page = ref(1)
 const total = ref(0)
 
-const runRows = ref<PipelineRun[]>([]) // 运行视图 / 发布视图
-const pipelineRows = ref<PipelineRef[]>([]) // 流水线视图
-const lastRun = ref<Map<string, PipelineRun>>(new Map()) // 流水线视图的「最近运行」列
+const runRows = ref<PipelineRun[]>([]) // 运行视图 / 发布视图共用
 const truncated = ref(false) // 聚合窗口被截断（共 N 条 > 实际扫描数）
 const index = ref<ResourceIndex>(emptyResourceIndex())
 const loading = ref(true)
@@ -122,14 +120,6 @@ async function load() {
     if (t !== token) return
     index.value = idx
 
-    if (view.value === 'pipelines') {
-      const all = phase.value ? idx.pipelines.filter((p) => p.kind === phase.value) : idx.pipelines
-      total.value = all.length
-      pipelineRows.value = all.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE)
-      await loadLastRuns(t)
-      return
-    }
-
     if (view.value === 'releases') {
       // 发布 = kind==='release' 的流水线的运行。hub 的 GET /runs 只能按 phase 过滤，
       // 按 kind 过滤只能前端做 —— 所以这里扫描一屏运行再筛（N-3 落地后可换成
@@ -160,18 +150,8 @@ async function load() {
   }
 }
 
-async function loadLastRuns(t: number) {
-  const snap = await runApi.listAll({ page: 1, pageSize: AGGREGATE_SCAN }).catch(() => undefined)
-  if (t !== token) return
-  // 后端已按 created_at desc 返回，第一条即最近一次
-  const m = new Map<string, PipelineRun>()
-  for (const r of snap?.items ?? []) if (!m.has(r.pipelineId)) m.set(r.pipelineId, r)
-  lastRun.value = m
-}
-
 // ---- 展示辅助 ----
 const ref_ = (r: PipelineRun) => index.value.byPipelineId.get(r.pipelineId)
-const lastRunOf = (p: PipelineRef) => lastRun.value.get(p.pipelineId)
 
 function fmtDuration(r: PipelineRun) {
   if (!r.startTime) return '—'
@@ -196,15 +176,6 @@ function openRelease(r: PipelineRun) {
 function openComponent(componentId: string) {
   router.push(`/components/${componentId}/overview`)
 }
-
-function openPipeline(p: PipelineRef) {
-  // 与组件内「流水线」Tab 同一条既有约束：M1 只有 build 类型可编排（附 A N-7）。
-  if (p.kind !== 'build') {
-    toast.err('M1 仅支持编排 build 类型流水线')
-    return
-  }
-  router.push(`/pipelines/${p.pipelineId}`)
-}
 </script>
 
 <template>
@@ -212,7 +183,7 @@ function openPipeline(p: PipelineRef) {
     <div class="page-head">
       <div class="crumb">SDP / 运行中心 / <b>{{ viewLabel }}</b></div>
       <h1 class="title">运行中心</h1>
-      <div class="sub">跨组件巡视 · 运行 / 流水线 / 发布</div>
+      <div class="sub">跨组件巡视 · 运行 / 发布</div>
     </div>
 
     <div class="tabs">
@@ -241,28 +212,6 @@ function openPipeline(p: PipelineRef) {
 
     <div class="card flush">
       <div v-if="loading" class="loading">加载中…</div>
-
-      <!-- 流水线视图 -->
-      <div v-else-if="view === 'pipelines' && pipelineRows.length === 0" class="empty">暂无流水线</div>
-      <table v-else-if="view === 'pipelines'" class="table">
-        <thead><tr><th>名称</th><th>所属组件</th><th>类型</th><th>版本</th><th>最近运行</th><th></th></tr></thead>
-        <tbody>
-          <tr v-for="p in pipelineRows" :key="p.pipelineId" style="cursor: pointer" @click="openPipeline(p)">
-            <td><b>{{ p.pipelineName }}</b></td>
-            <td><a @click.stop="openComponent(p.componentId)">{{ p.componentName }}</a></td>
-            <td><span class="chip">{{ p.kind }}</span></td>
-            <td>v{{ p.version }}</td>
-            <td>
-              <template v-if="lastRunOf(p)">
-                <StatusBadge :phase="lastRunOf(p)!.phase" />
-                <span class="sub" style="margin-left: 8px">{{ fmtTime(lastRunOf(p)!.startTime) }}</span>
-              </template>
-              <span v-else class="sub">—</span>
-            </td>
-            <td><a>编排 →</a></td>
-          </tr>
-        </tbody>
-      </table>
 
       <!-- 发布视图 -->
       <div v-else-if="view === 'releases' && runRows.length === 0" class="empty">暂无发布记录（kind=release 的流水线运行）</div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 全局骨架：左侧功能菜单(可折叠) + 顶栏 + router-view。
-// 布局决策见设计文档 §7 页面布局：https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI设计文档.md
+// 布局决策见设计文档 §7 页面布局：https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI-DESIGN.md
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
