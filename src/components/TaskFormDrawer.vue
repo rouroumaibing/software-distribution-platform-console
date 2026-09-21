@@ -181,7 +181,7 @@ async function save() {
     <template v-if="form.type === 'Build'">
       <div class="field">
         <label>工具镜像 Image</label>
-        <input v-model="form.image" class="input" placeholder="如 golang:1.22 / node:22" />
+        <input v-model="form.image" class="input" placeholder="如 golang:1.27 / node:22" />
         <div class="hint">命令在该镜像内执行，无需把脚本上传到代码仓库。</div>
       </div>
       <div class="field">
