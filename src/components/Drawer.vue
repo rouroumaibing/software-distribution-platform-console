@@ -19,9 +19,10 @@ const emit = defineEmits<{ close: [] }>()
 </template>
 
 <style scoped>
-.overlay { position: fixed; inset: 0; background: rgba(29, 29, 31, 0.32); z-index: 200; }
+.overlay { position: fixed; inset: 0; background: var(--scrim); z-index: 200; }
 .drawer {
-  position: fixed; top: 0; right: 0; height: 100%; background: #fff; z-index: 201;
+  position: fixed; top: 0; right: 0; height: 100%; background: var(--surface); z-index: 201;
+  border-left: 1px solid var(--hairline);
   box-shadow: -12px 0 40px rgba(0, 0, 0, 0.12);
   transform: translateX(100%); transition: transform 0.28s ease;
   display: flex; flex-direction: column;

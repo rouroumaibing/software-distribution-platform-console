@@ -168,7 +168,7 @@ const steps = computed(() => {
 .step .circle {
   width: 30px; height: 30px; border-radius: 50%; margin: 0 auto 8px;
   display: grid; place-items: center; font-size: 13px; font-weight: 700;
-  border: 2px solid var(--hairline); background: #fff; color: var(--sub);
+  border: 2px solid var(--hairline); background: var(--surface); color: var(--sub);
 }
 .step.done .circle { background: var(--succeeded-bg); border-color: var(--succeeded-fg); color: var(--succeeded-fg); }
 .step.active .circle { background: var(--running-bg); border-color: var(--action-blue); color: var(--action-blue); }

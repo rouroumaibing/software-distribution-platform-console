@@ -55,7 +55,8 @@ const router = createRouter({
 
         // ---- 平台管理 ----
         { path: 'admin/permissions', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'permissions' }, meta: { title: '用户与平台权限' } },
-        { path: 'admin/clusters', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'clusters' }, meta: { title: '集群' } },
+        { path: 'admin/targets', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'targets' }, meta: { title: '接入管理' } },
+        { path: 'admin/clusters', redirect: '/admin/targets' },
 
         // ---- 旧 flat 菜单路由 → redirect（deep link 兼容）----
         // 「发布」v4 起不再是顶层页，降为运行中心的视图 —— 所以旧链要直接落到该视图，
@@ -68,7 +69,7 @@ const router = createRouter({
         { path: 'pipelines', redirect: '/service-tree' },
         { path: 'releases', redirect: { path: '/runs', query: { view: 'releases' } } },
         { path: 'artifacts', redirect: '/service-tree' },
-        { path: 'environments', redirect: '/admin/clusters' },
+        { path: 'environments', redirect: '/admin/targets' },
         { path: 'permissions', redirect: '/admin/permissions' },
         { path: 'logs', redirect: '/service-tree' },
       ],

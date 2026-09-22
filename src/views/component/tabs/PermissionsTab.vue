@@ -218,44 +218,46 @@ const subjectTypeBadge = (b: ComponentRoleBinding) =>
 </template>
 
 <style scoped>
+/* 本块原先引用了三个**从未定义**的令牌（--border / --primary / --muted-fg）——
+   无效声明会被整条丢弃，等于边框/文字色静默失效。本轮统一到 §9.2 权威名。 */
 .perm-note {
-  background: var(--action-blue-soft);
-  border: 1px solid #c6dafc;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-card);
   padding: 10px 14px;
   font-size: 13px;
   margin-bottom: 4px;
 }
 .perm-note.warn {
-  background: #fff7e6;
-  border-color: #ffd591;
+  background: var(--warning-bg);
+  border-color: transparent;
 }
 .field .hint {
   margin: 4px 0 0;
   font-size: 12px;
-  color: var(--muted-fg);
+  color: var(--text-sub);
 }
 .seg {
   display: flex;
   gap: 8px;
 }
 .seg label {
-  border: 1px solid var(--border);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-card);
   padding: 6px 14px;
   cursor: pointer;
   font-size: 13px;
 }
 .seg label.active {
-  border-color: var(--primary);
-  background: var(--action-blue-soft);
-  color: var(--primary);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .input {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-card);
   font-size: 13px;
 }
@@ -263,8 +265,8 @@ const subjectTypeBadge = (b: ComponentRoleBinding) =>
   display: inline-block;
   padding: 1px 8px;
   border-radius: 10px;
-  background: var(--action-blue-soft);
-  color: var(--primary);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 12px;
 }
 </style>

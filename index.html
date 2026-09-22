@@ -7,6 +7,29 @@
     <!-- 运行时配置：容器启动时 envsubst 生成（见 build/console/images/config.js.template）；
          dev 模式下 404 不影响，auth.ts 会回退到 import.meta.env -->
     <script src="/config.js"></script>
+    <!--
+      首屏防白闪（CONSOLE-UI-DESIGN.md §9.6）：在样式生效前先把 data-theme / gray 落到
+      <html> 上，否则暗色用户会先看到一帧白底再跳到暗底。
+      本段逻辑是 src/utils/theme.ts 的**内联镜像**（内联脚本无法 import 模块）：
+      键名 sdp.console.theme / sdp.console.gray、取值 light|dark|'1'、属性 data-theme、
+      class gray —— 改任何一处都必须同步改另一边，两个文件都有交叉注释。
+    -->
+    <script>
+      (function () {
+        try {
+          var el = document.documentElement
+          var stored = localStorage.getItem('sdp.console.theme')
+          var theme = stored === 'light' || stored === 'dark'
+            ? stored
+            : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          el.setAttribute('data-theme', theme)
+          if (localStorage.getItem('sdp.console.gray') === '1') el.classList.add('gray')
+        } catch (e) {
+          // 隐私模式 / localStorage 被禁：给明色即可，不阻断启动
+          document.documentElement.setAttribute('data-theme', 'light')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

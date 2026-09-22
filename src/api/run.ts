@@ -16,7 +16,7 @@ export type TaskRunPhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Ski
 export interface PipelineRun {
   id: string
   pipelineId: string
-  clusterId: string
+  targetId: string
   crName: string
   crNamespace: string
   commitSha?: string
@@ -62,8 +62,8 @@ export interface Param {
 
 // 触发运行的请求体(与 hub TriggerRequest 对齐)。
 export interface TriggerRequest {
-  clusterId?: string
-  targetClusters?: string[] // 多环境扇出,忽略 clusterId
+  targetId?: string
+  targetIds?: string[] // 多环境扇出,忽略 targetId
   targetNamespace?: string
   repoUrl?: string
   repoRef?: string
@@ -74,7 +74,7 @@ export interface TriggerRequest {
 }
 
 export const runApi = {
-  // 触发运行:传目标集群/参数/代码源,DAG 由后端组装。
+  // 触发运行:传接入目标/参数/代码源,DAG 由后端组装。
   trigger: (pipelineId: string, payload: TriggerRequest) =>
     http.post<{ data: PipelineRun }>(`/pipelines/${pipelineId}/runs`, payload).then((r) => r.data.data),
 
@@ -83,8 +83,10 @@ export const runApi = {
   listByPipeline: (pipelineId: string, p?: Pagination) =>
     listPaged<PipelineRun>(`/pipelines/${pipelineId}/runs`, p),
 
-  // 全局运行列表（运行中心）：跨 pipeline 巡视，phase 可选过滤。
-  listAll: (p?: Pagination & { phase?: string }) =>
+  // 全局运行列表（运行中心）：跨 pipeline 巡视，phase / componentId 均为可选过滤。
+  // componentId 是流水线列表「最近运行」列要的：**一次**取回该组件下全部运行，
+  // 客户端按 pipelineId 分组取最新 —— 否则每条流水线各打一次 → N+1。
+  listAll: (p?: Pagination & { phase?: string; componentId?: string }) =>
     listPaged<PipelineRun>('/runs', p),
 
   listTasks: (runId: string) =>

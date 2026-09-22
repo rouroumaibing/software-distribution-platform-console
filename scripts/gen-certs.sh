@@ -15,14 +15,14 @@
 #   console-ingress-tls type tls，tls.crt / tls.key                       -> ingress 终结 TLS
 #                       消费方: charts/.../templates/ingress.yaml (ingress.tlsSecretName)
 #
-# 用法: ./gen-certs.sh [namespace]         默认命名空间 sdp-system（需已 export KUBECONFIG）
+# 用法: ./gen-certs.sh [namespace]         默认命名空间 sdp-workflow（需已 export KUBECONFIG）
 #       ./gen-certs.sh --local-only         只生成证书文件、不接触集群（无 kubectl / 集群未启动时用）
 #       证书产物目录可用 CERTS_DIR 覆盖（默认 <console>/output/certs）
 # 幂等: secret 已存在则更新（kubectl apply）；CA 文件已存在则复用（保证链一致）
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-NS="sdp-system"
+NS="sdp-workflow"
 LOCAL_ONLY=""
 for arg in "$@"; do
     case "$arg" in
@@ -74,6 +74,7 @@ DNS.4 = console.$NS.svc.cluster
 DNS.5 = console.$NS.svc.cluster.local
 DNS.6 = console.local
 DNS.7 = localhost
+DNS.8 = www.sdpworkflow.com
 IP.1 = 127.0.0.1
 EOF
 

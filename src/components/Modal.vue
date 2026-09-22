@@ -21,12 +21,12 @@ const emit = defineEmits<{ close: [] }>()
 
 <style scoped>
 .overlay {
-  position: fixed; inset: 0; background: rgba(29, 29, 31, 0.32); z-index: 200;
+  position: fixed; inset: 0; background: var(--scrim); z-index: 200;
   display: grid; place-items: center;
 }
 .modal {
-  background: #fff; border-radius: var(--radius-card);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+  background: var(--surface); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-pop);
   max-height: 84vh; display: flex; flex-direction: column;
   animation: pop 0.2s ease;
 }

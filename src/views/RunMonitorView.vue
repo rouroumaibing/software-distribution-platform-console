@@ -285,7 +285,7 @@ function duration(t: TaskRun) {
 .stage-col { flex: 0 0 190px; }
 .stage-label { font-size: 12px; color: var(--sub); font-weight: 600; margin-bottom: 8px; }
 .node {
-  border-radius: 10px; padding: 12px; background: #fff; cursor: pointer;
+  border-radius: 10px; padding: 12px; background: var(--surface); cursor: pointer;
   border: 1.5px solid var(--hairline); margin-bottom: 8px; transition: 0.15s;
 }
 .node.sel { box-shadow: 0 0 0 3px var(--action-blue-soft); }
@@ -312,8 +312,8 @@ function duration(t: TaskRun) {
 .log-out {
   margin: 0;
   padding: 12px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--term-bg);
+  color: var(--term-fg);
   border-radius: 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;

@@ -1,134 +1,183 @@
 <script setup lang="ts">
-// 环境 Tab：该组件的环境列表 + 新建环境（原 EnvironmentView 组件内逻辑，去级联；
-// 集群健康属平台级 → 平台管理页）。
-import { onMounted, ref } from 'vue'
-import Modal from '@/components/Modal.vue'
-import { clusterApi, type Cluster } from '@/api/cluster'
-import { environmentApi, type Environment } from '@/api/environment'
+// 环境 Tab（§7.12）：左树（分组 + 环境 + 状态点）+ 右对接配置面板 + 两步新建向导。
+// 数据：环境列表 / 分组 / 目标 / 凭据库。后端端点对齐 hub 的 /environments、
+// /environment-groups、/credentials、/environments/:id/test（均已实现）。
+import { onMounted, ref, computed } from 'vue'
 import { toast } from '@/utils/toast'
+import {
+  environmentApi,
+  environmentGroupApi,
+  credentialApi,
+  type Environment,
+  type EnvironmentGroup,
+  type Credential,
+} from '@/api/environment'
+import type { Target } from '@/api/target'
+import EnvTree from '@/components/environment/EnvTree.vue'
+import EnvAccessPanel from '@/components/environment/EnvAccessPanel.vue'
+import EnvCreateWizard from '@/components/environment/EnvCreateWizard.vue'
 
 const props = defineProps<{ componentId: string }>()
 
 const envs = ref<Environment[]>([])
-const clusters = ref<Cluster[]>([])
+const groups = ref<EnvironmentGroup[]>([])
+const targets = ref<Target[]>([])
+const credentials = ref<Credential[]>([])
+
 const loading = ref(true)
+const error = ref('')
+const selectedId = ref<string | undefined>(undefined)
+const wizardOpen = ref(false)
+const wizardGroupId = ref<string | undefined>(undefined)
 
-const createOpen = ref(false)
-const creating = ref(false)
-const form = ref({ key: '', name: '', clusterId: '', envType: 'test' as 'test' | 'production', namespace: '' })
+const selectedEnv = computed(() => envs.value.find((e) => e.id === selectedId.value))
 
-onMounted(async () => {
+async function loadAll() {
+  loading.value = true
+  error.value = ''
   try {
-    const [e, c] = await Promise.all([
-      environmentApi.listByComponent(props.componentId, { page: 1, pageSize: 100 }),
-      clusterApi.list({ page: 1, pageSize: 100 }).catch(() => ({ items: [] })),
+    const [e, g, c] = await Promise.all([
+      environmentApi.listByComponent(props.componentId, { page: 1, pageSize: 200 }),
+      environmentGroupApi.listByComponent(props.componentId, { page: 1, pageSize: 200 }),
+      credentialApi.list(undefined, undefined, { page: 1, pageSize: 200 }).catch(() => ({ items: [] as Credential[] })),
     ])
     envs.value = e.items
-    clusters.value = c.items
+    groups.value = g.items
+    credentials.value = c.items
+    await loadTargets()
+  } catch (err: any) {
+    error.value = '加载环境数据失败：' + (err?.response?.data?.error ?? err?.message ?? '未知错误')
   } finally {
     loading.value = false
   }
-})
-
-function openCreate() {
-  if (clusters.value.length === 0) {
-    toast.err('尚无已注册集群，请先让 Runner 上线注册')
-    return
-  }
-  form.value = { key: '', name: '', clusterId: clusters.value[0].id, envType: 'test', namespace: '' }
-  createOpen.value = true
 }
 
-async function create() {
-  const f = form.value
-  if (!f.key.trim() || !f.name.trim() || !f.namespace.trim() || !f.clusterId) {
-    toast.err('Key、名称、命名空间与目标集群均必填')
+async function loadTargets() {
+  try {
+    const r = await (
+      await import('@/api/target')
+    ).targetApi.list({ page: 1, pageSize: 200 })
+    targets.value = r.items
+  } catch {
+    targets.value = []
+  }
+}
+
+onMounted(loadAll)
+
+function onSelect(id: string) {
+  selectedId.value = id
+}
+
+function onCreateEnv(groupId?: string) {
+  wizardGroupId.value = groupId
+  wizardOpen.value = true
+}
+
+async function onCreated(env: Environment) {
+  await loadAll()
+  selectedId.value = env.id
+  toast.ok('已选中新环境，可在右侧继续完善对接配置')
+}
+
+function onSaved(env: Environment) {
+  const i = envs.value.findIndex((e) => e.id === env.id)
+  if (i >= 0) envs.value[i] = env
+  else envs.value.push(env)
+}
+
+function onDeleted(id: string) {
+  envs.value = envs.value.filter((e) => e.id !== id)
+  if (selectedId.value === id) selectedId.value = undefined
+}
+
+async function onCreateGroup() {
+  const name = prompt('分组名称')
+  if (!name?.trim()) return
+  try {
+    const g = await environmentGroupApi.create({ componentId: props.componentId, name: name.trim() })
+    groups.value.push(g)
+    toast.ok('分组已创建')
+  } catch (e: any) {
+    toast.err('创建分组失败：' + (e?.response?.data?.error ?? e?.message ?? '未知错误'))
+  }
+}
+
+async function onDeleteGroup(id: string) {
+  const g = groups.value.find((x) => x.id === id)
+  if (!g) return
+  const hasEnv = envs.value.some((e) => e.groupId === id)
+  if (hasEnv) {
+    toast.err('分组非空，无法删除（请先移出或删除组内环境）')
     return
   }
-  creating.value = true
+  if (!confirm(`确认删除分组「${g.name}」？`)) return
   try {
-    const e = await environmentApi.create({
-      componentId: props.componentId,
-      key: f.key.trim(),
-      name: f.name.trim(),
-      clusterId: f.clusterId,
-      envType: f.envType,
-      namespace: f.namespace.trim(),
-    })
-    toast.ok(`环境「${e.name}」已创建`)
-    createOpen.value = false
-    envs.value = (await environmentApi.listByComponent(props.componentId, { page: 1, pageSize: 100 })).items
+    await environmentGroupApi.remove(id)
+    groups.value = groups.value.filter((x) => x.id !== id)
+    toast.ok('分组已删除')
   } catch (e: any) {
-    toast.err('创建失败：' + (e?.response?.data?.error ?? e?.message ?? '未知错误'))
-  } finally {
-    creating.value = false
+    toast.err('删除分组失败：' + (e?.response?.data?.error ?? e?.message ?? '未知错误'))
   }
 }
 </script>
 
 <template>
-  <div>
+  <div class="env">
     <div class="toolbar">
       <div class="spacer"></div>
-      <button class="btn btn-primary btn-sm" @click="openCreate">＋ 新建环境</button>
-    </div>
-    <div class="card flush">
-      <div v-if="loading" class="loading">加载中…</div>
-      <div v-else-if="envs.length === 0" class="empty">
-        <p>该组件下暂无环境</p>
-        <button class="btn btn-primary btn-sm" @click="openCreate">＋ 创建第一个环境</button>
-      </div>
-      <table v-else class="table">
-        <thead><tr><th>名称</th><th>类型</th><th>命名空间</th><th>集群</th></tr></thead>
-        <tbody>
-          <tr v-for="e in envs" :key="e.id">
-            <td><b>{{ e.name }}</b></td>
-            <td>
-              <span class="badge" :class="e.envType === 'production' ? 'b-fail' : 'b-pend'">
-                <span class="pt"></span>{{ e.envType }}
-              </span>
-            </td>
-            <td class="mono">{{ e.namespace }}</td>
-            <td>{{ clusters.find((c) => c.id === e.clusterId)?.name ?? e.clusterId.slice(0, 8) }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <button class="btn btn-primary btn-sm" @click="onCreateEnv()">＋ 新建环境</button>
     </div>
 
-    <Modal :open="createOpen" title="新建环境" @close="createOpen = false">
-      <div class="field">
-        <label>Key *</label>
-        <input v-model="form.key" class="input" placeholder="英文标识，如 prod" maxlength="64" />
+    <div v-if="loading" class="loading">加载中…</div>
+    <div v-else-if="error" class="err-box">{{ error }} <button class="link-btn" @click="loadAll">重试</button></div>
+
+    <div v-else class="env-layout">
+      <EnvTree
+        :groups="groups"
+        :envs="envs"
+        :selected-id="selectedId"
+        @select="onSelect"
+        @create-env="onCreateEnv"
+        @create-group="onCreateGroup"
+        @delete-group="onDeleteGroup"
+      />
+
+      <div class="env-main">
+        <EnvAccessPanel
+          v-if="selectedEnv"
+          :key="selectedEnv.id"
+          :env="selectedEnv"
+          :targets="targets"
+          :groups="groups"
+          :credentials="credentials"
+          @saved="onSaved"
+          @deleted="onDeleted"
+          @close="selectedId = undefined"
+        />
+        <div v-else class="empty main">
+          <p>从左侧选择环境查看对接配置，或新建第一个环境。</p>
+          <button class="btn btn-primary btn-sm" @click="onCreateEnv()">＋ 新建环境</button>
+        </div>
       </div>
-      <div class="field">
-        <label>名称 *</label>
-        <input v-model="form.name" class="input" placeholder="如：生产环境" maxlength="128" />
-      </div>
-      <div class="field">
-        <label>类型</label>
-        <select v-model="form.envType" class="select">
-          <option value="test">test（测试）</option>
-          <option value="production">production（生产）</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>目标集群 *</label>
-        <select v-model="form.clusterId" class="select">
-          <option v-for="c in clusters" :key="c.id" :value="c.id">
-            {{ c.name }}（{{ c.status === 'online' ? '在线' : '离线' }}）
-          </option>
-        </select>
-      </div>
-      <div class="field">
-        <label>命名空间 *</label>
-        <input v-model="form.namespace" class="input" placeholder="如：user-center-prod" maxlength="128" />
-      </div>
-      <template #foot>
-        <button class="btn btn-pearl" @click="createOpen = false">取消</button>
-        <button class="btn btn-primary" :disabled="creating" @click="create">
-          {{ creating ? '创建中…' : '创建' }}
-        </button>
-      </template>
-    </Modal>
+    </div>
+
+    <EnvCreateWizard
+      :open="wizardOpen"
+      :component-id="componentId"
+      :groups="groups"
+      :targets="targets"
+      :default-group-id="wizardGroupId"
+      @close="wizardOpen = false"
+      @created="onCreated"
+    />
   </div>
 </template>
+
+<style scoped>
+.env-layout { display: flex; gap: 0; border: 1px solid var(--hairline); border-radius: var(--radius-card); overflow: hidden; min-height: 420px; }
+.env-main { flex: 1; display: flex; }
+.env-main > :deep(.panel),
+.env-main > .empty.main { flex: 1; }
+.empty.main { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 48px; }
+</style>

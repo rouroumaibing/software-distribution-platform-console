@@ -1,3 +1,6 @@
+# 默认命名空间（与 hub/runner chart 同约定：所有名字空间内资源注入 metadata.namespace，默认 sdp-workflow）
+namespace: sdp-workflow
+
 basic:
   # k8s 资源名统一用短名（镜像名才是全名）
   component: console
@@ -22,19 +25,20 @@ resources:
 
 # TLS 证书 secret（443 ssl 用）：chart 只**引用** secret 名，容器内挂到 /etc/nginx/ssl。
 # 生产：由运维**手工创建**该 secret（证书来自你自己的 PKI），部署流程不生成任何私钥——同 old/go-devops。
-# 本地：缺失时由仓内脚本 scripts/gen-certs.sh 自签兜底（产物 console/output/certs，随 pnpm clean 回收）。
+# 本地：缺失时由仓内脚本 scripts/gen-certs.sh 自签兜底（产物 console/output/certs，随 pnpm clean 回收）；
+#       默认域名已设为 www.sdpworkflow.com，gen-certs.sh 的 SAN 已含该域名。
 # 必需 key：ca.crt / server.crt / server.key（items 见 templates/deployment.yaml）。
 cert:
   secretName: console-tls
 
 # ingress（nginx ingress-controller 终结外部 HTTPS，backend-protocol HTTPS 转发到本 svc 443）。
-# host 留空 = 匹配所有 Host（本地直接 https://localhost:8443 访问）；上真实环境填域名。
+# host 默认 www.sdpworkflow.com（生产可 helm -n sdp-workflow --set ingress.host=... 覆盖）。
 # tlsSecretName 同 cert.secretName：生产由运维手工创建（type kubernetes.io/tls，tls.crt/tls.key）。
 ingress:
-  host: ""
+  host: "www.sdpworkflow.com"
   tlsSecretName: console-ingress-tls
 
-# hub 反代目标（nginx ConfigMap 中 upstream，集群内 svc 名须为 hub）
+# hub 反代目标（nginx ConfigMap 中 upstream，集群内 svc 名须为 hub，命名空间 sdp-workflow）
 api:
   hubService: hub
   hubPort: "8080"
@@ -43,7 +47,7 @@ api:
   baseUrl: ""
 
 # 前端认证配置（chart values -> ConfigMap -> config.js，改这里 helm upgrade 即可，无需重建镜像）。
-# authDisabled=true：跳过 Keycloak 直接进入已登录态（本地无 Keycloak 时用）。
+# authDisabled=true：跳过 Keycloak 直接进入已登录态（本地无 Keycloak 时用，本期保持）。
 # 接入真实 Keycloak：authDisabled=false 并填全 keycloakIssuerUrl/ClientId/RedirectUri，
 # clientId 需与 hub 的 KEYCLOAK_CLIENT_ID 一致（hub 校验 token azp）。
 auth:

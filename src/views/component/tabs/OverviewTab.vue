@@ -98,7 +98,7 @@ const succRate = () => {
 
 <style scoped>
 .ov-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.kpi { background: #fff; border: 1px solid var(--hairline); border-radius: var(--radius-card); padding: 14px 16px; }
+.kpi { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-card); padding: 14px 16px; }
 .kpi .label { font-size: 12.5px; color: var(--sub); }
 .kpi .num { font-size: 26px; font-weight: 700; margin-top: 4px; }
 .ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }

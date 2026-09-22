@@ -4,7 +4,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { clusterApi, type Cluster } from '@/api/cluster'
+import { targetApi, type Target } from '@/api/target'
 import { orgApi } from '@/api/org'
 import { catalogApi } from '@/api/catalog'
 import { componentApi } from '@/api/component'
@@ -13,19 +13,19 @@ import { runApi, type PipelineRun } from '@/api/run'
 import { environmentApi } from '@/api/environment'
 
 const router = useRouter()
-const clusters = ref<Cluster[]>([])
+const targets = ref<Target[]>([])
 const recentRuns = ref<PipelineRun[]>([])
 const pipelineNameMap = ref<Record<string, string>>({})
 const runCount = ref(0)
 const envCount = ref(0)
 const loading = ref(true)
 
-const onlineClusters = () => clusters.value.filter((c) => c.status === 'online').length
+const onlineTargets = () => targets.value.filter((c) => c.status === 'online').length
 
 onMounted(async () => {
   try {
-    const cp = await clusterApi.list({ page: 1, pageSize: 100 })
-    clusters.value = cp.items
+    const cp = await targetApi.list({ page: 1, pageSize: 100 })
+    targets.value = cp.items
 
     // 沿 Org→Tree→Service→Component→Pipeline 取第一条流水线的最近运行做展示。
     const orgs = await orgApi.list({ page: 1, pageSize: 1 })
@@ -70,11 +70,11 @@ function duration(r: PipelineRun) {
   <div>
     <div class="page-head">
       <h1 class="title">总览</h1>
-      <div class="sub">跨集群运行态势</div>
+      <div class="sub">跨目标运行态势</div>
     </div>
 
-    <div v-if="clusters.length > 0 && onlineClusters() < clusters.length" class="err-box">
-      ⚠ {{ clusters.length - onlineClusters() }} 个集群离线，Runner 重连后将自动重放 Pending 任务。
+    <div v-if="targets.length > 0 && onlineTargets() < targets.length" class="err-box">
+      ⚠ {{ targets.length - onlineTargets() }} 个目标离线，Runner 重连后将自动重放 Pending 任务。
     </div>
 
     <div class="kpi-grid">
@@ -87,13 +87,13 @@ function duration(r: PipelineRun) {
         <div class="num">{{ loading ? '…' : envCount }}</div>
       </div>
       <div class="card kpi">
-        <div class="label">注册集群</div>
-        <div class="num">{{ clusters.length }}</div>
+        <div class="label">注册目标</div>
+        <div class="num">{{ targets.length }}</div>
       </div>
       <div class="card kpi">
-        <div class="label">在线集群</div>
-        <div class="num" :style="{ color: onlineClusters() === clusters.length ? 'var(--succeeded-fg)' : 'var(--failed-fg)' }">
-          {{ onlineClusters() }}
+        <div class="label">在线目标</div>
+        <div class="num" :style="{ color: onlineTargets() === targets.length ? 'var(--succeeded-fg)' : 'var(--failed-fg)' }">
+          {{ onlineTargets() }}
         </div>
       </div>
     </div>

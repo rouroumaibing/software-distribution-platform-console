@@ -68,7 +68,7 @@ function duration(r: PipelineRun) {
       <div v-else-if="runs.length === 0" class="empty">暂无运行记录</div>
       <table v-else class="table">
         <thead>
-          <tr><th>运行</th><th>集群</th><th>触发人</th><th>状态</th><th>耗时</th><th>开始时间</th><th></th></tr>
+          <tr><th>运行</th><th>目标</th><th>触发人</th><th>状态</th><th>耗时</th><th>开始时间</th><th></th></tr>
         </thead>
         <tbody>
           <tr
@@ -78,7 +78,7 @@ function duration(r: PipelineRun) {
             @click="router.push(`/pipelines/${r.pipelineId}/runs/${r.id}`)"
           >
             <td class="mono">{{ r.crName || r.id.slice(0, 8) }}</td>
-            <td class="mono">{{ r.clusterId?.slice(0, 8) || '—' }}</td>
+            <td class="mono">{{ r.targetId?.slice(0, 8) || '—' }}</td>
             <td>{{ r.triggeredBy || '—' }}</td>
             <td><StatusBadge :phase="r.phase" /></td>
             <td>{{ duration(r) }}</td>

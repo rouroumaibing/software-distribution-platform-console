@@ -224,7 +224,7 @@ function openComponent(componentId: string) {
               <a v-if="ref_(r)" @click.stop="openComponent(ref_(r)!.componentId)">{{ ref_(r)!.componentName }}</a>
               <span v-else class="mono">{{ r.pipelineId.slice(0, 8) }}</span>
             </td>
-            <td class="mono">{{ r.clusterId ? r.clusterId.slice(0, 8) : '—' }}</td>
+            <td class="mono">{{ r.targetId ? r.targetId.slice(0, 8) : '—' }}</td>
             <td>{{ ref_(r)?.pipelineName ?? r.pipelineId.slice(0, 8) }}</td>
             <td><StatusBadge :phase="r.phase" /></td>
             <td class="mono">{{ fmtTime(r.startTime) }}</td>

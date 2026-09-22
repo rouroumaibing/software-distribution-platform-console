@@ -1,6 +1,6 @@
 import { http } from './http'
 import { createCrud, listPaged } from './crud'
-import type { Pagination } from './http'
+import type { Envelope, Pagination } from './http'
 
 export interface User {
   id: string
@@ -52,6 +52,31 @@ export interface ComponentRoleBinding {
   grantedAt: string
 }
 
+// §7.2 平台级角色（C-10 `/platform-roles`）：内置 sdp-admin 等 + 组织自定义。
+// 这是平台级授权的权威角色表，取代了 V1 单一 `roles` 表。
+export interface PlatformRole {
+  id: string
+  orgId?: string | null
+  name: string
+  description?: string
+  actions: string[]
+  isSystem: boolean
+  createdAt: string
+}
+
+// 平台级绑定（C-10 `/platform-role-bindings`）：把主体（user / Keycloak 组）
+// 关联到某个 PlatformRole。expiresAt 为 null = 永久；非空且已过期则在
+// ListMatching 中被过滤（见 ACCOUNT-PERMISSION-MODEL §7.4 / §10 #15）。
+export interface PlatformRoleBinding {
+  id: string
+  orgId?: string | null
+  subjectType: 'user' | 'group'
+  subjectId: string
+  platformRoleId: string
+  expiresAt?: string | null
+  createdAt: string
+}
+
 const userCrud = createCrud<User>('/users')
 
 export const permissionApi = {
@@ -85,5 +110,33 @@ export const permissionApi = {
         .get<{ data: ComponentRoleBinding[] }>(`/components/${componentId}/role-bindings`)
         .then((r) => r.data.data),
     remove: (id: string) => http.delete(`/role-bindings/${id}`),
+  },
+
+  // §7.2 平台级 RBAC（C-10）。createCrud 覆盖标准的 create/get/update/remove；
+  // list 单独写（handler 直接返回数组，无分页信封）。
+  platformRoles: {
+    ...createCrud<PlatformRole>('/platform-roles'),
+    list: () =>
+      http.get<Envelope<PlatformRole[]>>('/platform-roles').then((r) => r.data.data ?? []),
+  },
+
+  // 平台级绑定：只有 GET/POST/DELETE（改角色 = 删后重建，handler 无 Update）。
+  platformBindings: {
+    list: () =>
+      http
+        .get<Envelope<PlatformRoleBinding[]>>('/platform-role-bindings')
+        .then((r) => r.data.data ?? []),
+    create: (
+      payload: {
+        subjectType: 'user' | 'group'
+        subjectId: string
+        platformRoleId: string
+        expiresAt?: string | null
+      },
+    ) =>
+      http
+        .post<Envelope<PlatformRoleBinding>>('/platform-role-bindings', payload)
+        .then((r) => r.data.data as PlatformRoleBinding),
+    remove: (id: string) => http.delete(`/platform-role-bindings/${id}`),
   },
 }

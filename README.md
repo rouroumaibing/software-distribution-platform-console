@@ -33,15 +33,15 @@ console 的 HTTPS 由**两个集群内 Secret** 承载，**镜像与交付包不
 - **生产环境：由运维手工创建这两个 Secret**（证书来自你自己的 PKI / CA），组件只在容器内引用 —— 与参考工程 `old/go-devops` 的做法一致（`chart` 只声明 `secretName`，部署流程不生成私钥）。示例：
 
   ```bash
-  kubectl -n sdp-system create secret generic console-tls \
+  kubectl -n sdp-workflow create secret generic console-tls \
       --from-file=ca.crt=ca.crt --from-file=server.crt=server.crt --from-file=server.key=server.key
-  kubectl -n sdp-system create secret tls console-ingress-tls --cert server.crt --key server.key
+  kubectl -n sdp-workflow create secret tls console-ingress-tls --cert server.crt --key server.key
   ```
 
   Secret 名可改，改 `values.yaml` 的 `cert.secretName` / `ingress.tlsSecretName` 即可（两者是 chart 的引用入口）。
 - **本地联调**：没有 PKI 时用仓内脚本 `scripts/gen-certs.sh` 自签兜底（临时测试用途，产物落 `output/certs`，随 `pnpm clean` 一起回收；私钥 `chmod 600`）。脚本默认会：生成 CA + server 证书 → `kubectl apply` 覆写上面两个 Secret（幂等；CA 文件已存在则复用，保证证书链一致）；运行前需已 `export KUBECONFIG`。
   - 只想拿到证书文件（集群没起 / 没有 kubectl）时加 `--local-only`：`bash scripts/gen-certs.sh --local-only` —— 只产出 `output/certs/{ca.crt,server.crt,server.key}`，不碰集群；集群可用后再跑一次**不带**该参数的脚本即可写入 Secret，或用上面的 `kubectl create secret` 手工创建。
-  - 命名空间默认 `sdp-system`（可作首个位置参数覆盖）；产物目录可用 `CERTS_DIR` 覆盖。
+  - 命名空间默认 `sdp-workflow`（可作首个位置参数覆盖）；产物目录可用 `CERTS_DIR` 覆盖。
   - ⚠️ 本脚本生成的 CA 是**本地自签的**：换机 / 重生成会让指纹变化，已经信任过旧 `ca.crt` 的浏览器需要重新信任。
 
 ## 设计文档

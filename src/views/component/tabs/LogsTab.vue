@@ -109,8 +109,8 @@ async function loadLogs() {
 .log-out {
   margin: 0;
   padding: 12px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--term-bg);
+  color: var(--term-fg);
   border-radius: 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;

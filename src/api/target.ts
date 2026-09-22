@@ -1,7 +1,7 @@
 import { createCrud, listPaged } from './crud'
 import type { Pagination } from './http'
 
-export interface Cluster {
+export interface Target {
   id: string
   name: string
   vendor: string
@@ -12,9 +12,9 @@ export interface Cluster {
   createdAt: string
 }
 
-const crud = createCrud<Cluster>('/clusters')
+const crud = createCrud<Target>('/targets')
 
-export const clusterApi = {
+export const targetApi = {
   ...crud,
-  list: (p?: Pagination) => listPaged<Cluster>('/clusters', p),
+  list: (p?: Pagination) => listPaged<Target>('/targets', p),
 }
