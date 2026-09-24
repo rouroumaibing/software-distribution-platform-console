@@ -135,4 +135,18 @@ export const runApi = {
         action,
       })
       .then((r) => r.data.data),
+
+  // 取消运行(POST /runs/:id/cancel)：停掉 Pending/Running/WaitingApproval 的 run，
+  // Runner 会把它置为 Cancelled 并清掉在途 TaskRun。终态 run 后端返回 409。
+  cancel: (runId: string) =>
+    http.post<{ data: unknown }>(`/runs/${encodeURIComponent(runId)}/cancel`).then((r) => r.data.data),
+
+  // 单任务重跑(POST /runs/:id/tasks/:name/rerun)：只重跑该任务及其下游，
+  // 不重投整个 run —— 对应 Hub 侧 C-07（Runner 的 rerun handler 早已就绪）。
+  rerunTask: (runId: string, taskName: string) =>
+    http
+      .post<{ data: unknown }>(
+        `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskName)}/rerun`,
+      )
+      .then((r) => r.data.data),
 }

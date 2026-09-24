@@ -6,6 +6,7 @@ import { useRoute } from 'vue-router'
 import Modal from '@/components/Modal.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { runApi, type PipelineRun, type TaskRun, type TaskRunLog } from '@/api/run'
+import { isRunCancellable, isTaskRerunnable } from '@/utils/run'
 import { toast } from '@/utils/toast'
 
 const route = useRoute()
@@ -131,6 +132,44 @@ async function redispatch() {
   await refresh()
 }
 
+// 可取消的运行：仍在推进（Pending/Running/WaitingApproval）才允许取消；
+// 终态 run 后端会返回 409，这里也提前隐藏按钮。相位策略在 utils/run.ts
+//（由 scripts/run-control-smoke.mjs 钉住），与后端 CancelRun 的 switch 对齐。
+const canCancel = computed(() => !!run.value && isRunCancellable(run.value.phase))
+
+// 取消运行：两段式内联确认（不依赖 window.confirm，Electron 内嵌预览下不可靠）。
+const confirmingCancel = ref(false)
+const cancelling = ref(false)
+
+async function cancelRun() {
+  if (!confirmingCancel.value) {
+    confirmingCancel.value = true
+    return
+  }
+  confirmingCancel.value = false
+  cancelling.value = true
+  try {
+    await runApi.cancel(runId)
+    toast.ok('已发送取消请求')
+    await refresh()
+  } catch (e: any) {
+    toast.err('取消失败：' + (e?.response?.data?.error ?? e?.message ?? '未知错误'))
+  } finally {
+    cancelling.value = false
+  }
+}
+
+// 单任务重跑：只重跑该任务及其下游，后端转发给 Runner（C-07）。
+async function rerunTask(t: TaskRun) {
+  try {
+    await runApi.rerunTask(runId, t.taskName)
+    toast.ok(`已请求重跑 ${t.taskName}`)
+    await refresh()
+  } catch (e: any) {
+    toast.err('重跑失败：' + (e?.response?.data?.error ?? e?.message ?? '未知错误'))
+  }
+}
+
 function openApproval(t: TaskRun) {
   selected.value = t
   approvalReason.value = ''
@@ -180,6 +219,24 @@ function duration(t: TaskRun) {
           <span v-if="isActive" class="sub">● 每 3s 自动刷新</span>
           <div class="spacer" style="flex: 1"></div>
           <button v-if="run.phase === 'Failed' || run.message" class="btn btn-pearl btn-sm" @click="redispatch">↻ 重新投递</button>
+          <template v-if="canCancel">
+            <button
+              v-if="!confirmingCancel"
+              class="btn btn-danger btn-sm"
+              :disabled="cancelling"
+              @click="cancelRun"
+            >
+              取消运行
+            </button>
+            <template v-else>
+              <button class="btn btn-danger btn-sm" :disabled="cancelling" @click="cancelRun">
+                {{ cancelling ? '取消中…' : '确认取消？' }}
+              </button>
+              <button class="btn btn-pearl btn-sm" :disabled="cancelling" @click="confirmingCancel = false">
+                返回
+              </button>
+            </template>
+          </template>
         </div>
         <div v-if="run.message" class="err-box" style="margin-top: 10px">{{ run.message }}</div>
       </div>
@@ -239,6 +296,9 @@ function duration(t: TaskRun) {
             <div v-if="selected.message" class="err-box">{{ selected.message }}</div>
             <div v-if="selected.type === 'Approval' && (waitingApproval || selected.phase === 'Running')" class="toolbar">
               <button class="btn btn-primary btn-sm" @click="openApproval(selected)">审批决策</button>
+            </div>
+            <div v-if="isTaskRerunnable(selected.phase)" class="toolbar">
+              <button class="btn btn-pearl btn-sm" @click="rerunTask(selected)">↻ 重跑任务（含下游）</button>
             </div>
           </template>
           <div v-else class="empty">点击 DAG 节点查看详情</div>
