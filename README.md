@@ -37,7 +37,7 @@
 ## 认证（Keycloak 真对接，2026-09-23 起本地 deploy 默认开启）
 
 - 未登录访问任何受保护路由 → 先进 `/login-hint`（展示预置账号 + 「临时初始密码，登录后须重置」批注）→ 点「继续登录」跳 Keycloak 托管页（Authorization Code + PKCE），回调 `/auth/callback` 后入站。
-- 运行时配置经 chart values `auth.*` → ConfigMap `config.js` → `window.__APP_CONFIG__` 注入（`VITE_AUTH_DISABLED=false` + issuer/clientId/redirectUri 与 hub 侧同源，issuer 三方一字不差，详见 `docs/hub/KEYCLOAK.md` §6.5）。dev 旁路 `VITE_AUTH_DISABLED=true` 仍可用。
+- 运行时配置经 chart values `auth.*` → ConfigMap `config.js` → `window.__APP_CONFIG__` 注入（`VITE_AUTH_DISABLED=false` + issuer/clientId/redirectUri 与 hub 侧同源，issuer 三方一字不差，详见 `docs/shared/KEYCLOAK.md` §6.5）。dev 旁路 `VITE_AUTH_DISABLED=true` 仍可用。
 - ⚠️ chart 模板对 bool 值做了 `toString` 归一化（helm `--set xxx=false` 解析成 bool，`false | default "true"` 会被 sprig 当零值顶掉——勿回退成裸 `default`）。
 
 ## TLS 证书（交付契约 / 本地自签）
