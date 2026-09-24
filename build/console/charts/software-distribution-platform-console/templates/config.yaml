@@ -13,8 +13,12 @@ data:
     // 运行时配置：chart values -> ConfigMap 注入，改 values 后 helm upgrade 生效。
     window.__APP_CONFIG__ = {
       VITE_API_BASE_URL: {{ .Values.api.baseUrl | default "" | quote }},
-      VITE_AUTH_DISABLED: {{ .Values.auth.authDisabled | default "true" | quote }},
+      # ⚠️ toString 先归一化：helm --set xxx=false 会把值解析成 bool，bool false 落进
+      # sprig default 会被当零值顶掉（真踩过：--set false 渲染成 "true"）。values 默认 "true"。
+      VITE_AUTH_DISABLED: {{ .Values.auth.authDisabled | toString | quote }},
       VITE_KEYCLOAK_ISSUER_URL: {{ .Values.auth.keycloakIssuerUrl | default "" | quote }},
       VITE_KEYCLOAK_CLIENT_ID: {{ .Values.auth.keycloakClientId | default "" | quote }},
       VITE_KEYCLOAK_REDIRECT_URI: {{ .Values.auth.keycloakRedirectUri | default "" | quote }},
+      VITE_LOGIN_HINT_USER: {{ .Values.auth.loginHintUser | default "" | quote }},
+      VITE_LOGIN_HINT_PASSWORD: {{ .Values.auth.loginHintPassword | default "" | quote }},
     };

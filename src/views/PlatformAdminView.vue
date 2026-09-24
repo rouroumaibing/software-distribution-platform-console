@@ -1,37 +1,36 @@
 <script setup lang="ts">
 // 平台管理（IA v2）：用户与平台权限（平台级 RBAC，C-10 端点）/ 接入管理。
 // 组件级授权在各组件详情的「权限」Tab —— 权限双轨的平台侧半边。
-import { onMounted, reactive, ref } from 'vue'
+//
+// D3 之后 hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2），所以本页**没有用户目录**，
+// 也不再调 `GET /users`（该端点已随 users 表删除）。主体暴露方式按决策文档 §3.5 第 4 条
+// 的 (b′)：下拉候选 = 绑定表里去重出的「已绑定主体」，新主体靠**手输** `sub` / 组路径。
+import { computed, onMounted, reactive, ref } from 'vue'
 import Modal from '@/components/Modal.vue'
-import {
-  permissionApi,
-  type User,
-  type PlatformRole,
-  type PlatformRoleBinding,
-} from '@/api/permission'
+import { permissionApi, type ComponentRole, type PlatformRole, type PlatformRoleBinding } from '@/api/permission'
 import { targetApi, type Target } from '@/api/target'
 import { toast } from '@/utils/toast'
-import { parseActions, formatExpiryISO } from '@/utils/permission'
+import {
+  COMPONENT_ROLE_ACTION_GROUPS,
+  failMsg,
+  formatExpiryISO,
+  knownSubjects,
+  parseActions,
+  subjectInputHint,
+  subjectLabel,
+  validateSubjectInput,
+  type SubjectType,
+} from '@/utils/permission'
 
 const props = defineProps<{ section: 'permissions' | 'targets' }>()
 
-const users = ref<User[]>([])
 const roles = ref<PlatformRole[]>([]) // §7.2 平台角色（C-10，可管理）
 const bindings = ref<PlatformRoleBinding[]>([]) // 平台级绑定（C-10，可管理）
+const componentRoles = ref<ComponentRole[]>([]) // §7.3 组件角色（B-11，可管理）
 const targets = ref<Target[]>([])
 const loading = ref(true)
 
-const userById = (id?: string) => users.value.find((u) => u.id === id)
 const roleById = (id?: string) => roles.value.find((r) => r.id === id)
-
-// 统一把 axios 错误翻成可展示文案：优先结构化的 reasons（如 409 删除被拒理由），
-// 其次服务端 error 字段，最后兜底 message。
-function failMsg(e: unknown): string {
-  const d = (e as { response?: { data?: { reasons?: string[]; error?: string } } })?.response?.data
-  if (d?.reasons?.length) return d.reasons.join('、')
-  if (d?.error) return d.error
-  return (e as { message?: string })?.message || '操作失败'
-}
 
 async function loadRoles() {
   roles.value = await permissionApi.platformRoles.list()
@@ -39,13 +38,14 @@ async function loadRoles() {
 async function loadBindings() {
   bindings.value = await permissionApi.platformBindings.list()
 }
+async function loadComponentRoles() {
+  componentRoles.value = await permissionApi.componentRoles.list()
+}
 
 onMounted(async () => {
   try {
     if (props.section === 'permissions') {
-      const [u] = await Promise.all([permissionApi.users.list({ page: 1, pageSize: 100 })])
-      users.value = u.items
-      await Promise.all([loadRoles(), loadBindings()])
+      await Promise.all([loadRoles(), loadBindings(), loadComponentRoles()])
     } else {
       const c = await targetApi.list({ page: 1, pageSize: 100 })
       targets.value = c.items
@@ -113,21 +113,104 @@ async function deleteRole(r: PlatformRole) {
 }
 
 // ---------------------------------------------------------------------------
+// 组件角色（§7.3，B-11 自定义角色）：与平台角色同级，写端点同样需平台级 user:manage。
+// 与平台角色不同，权限点用「勾选」而非自由文本 —— 组件可授予的动作是固定 vocabulary
+// （hub 按字面量校验，拼错即静默 403），勾选能从根本上杜绝手滑。
+// ---------------------------------------------------------------------------
+const compRoleModal = ref(false)
+const compRoleSaving = ref(false)
+const compRoleEditId = ref<string | null>(null)
+const compRoleForm = reactive<{ name: string; description: string; actions: string[] }>({
+  name: '',
+  description: '',
+  actions: [],
+})
+
+function openCreateCompRole() {
+  compRoleEditId.value = null
+  compRoleForm.name = ''
+  compRoleForm.description = ''
+  compRoleForm.actions = []
+  compRoleModal.value = true
+}
+function openEditCompRole(r: ComponentRole) {
+  compRoleEditId.value = r.id
+  compRoleForm.name = r.name
+  compRoleForm.description = r.description ?? ''
+  compRoleForm.actions = [...(r.actions ?? [])]
+  compRoleModal.value = true
+}
+function toggleCompAction(value: string, checked: boolean) {
+  if (checked) {
+    if (!compRoleForm.actions.includes(value)) compRoleForm.actions.push(value)
+  } else {
+    compRoleForm.actions = compRoleForm.actions.filter((a) => a !== value)
+  }
+}
+async function saveCompRole() {
+  if (!compRoleForm.name.trim()) {
+    toast.err('请填写角色名')
+    return
+  }
+  if (compRoleForm.actions.length === 0) {
+    toast.err('请至少勾选一个权限点')
+    return
+  }
+  compRoleSaving.value = true
+  try {
+    const payload = {
+      name: compRoleForm.name.trim(),
+      description: compRoleForm.description.trim(),
+      actions: [...compRoleForm.actions],
+    }
+    if (compRoleEditId.value) await permissionApi.componentRoles.update(compRoleEditId.value, payload)
+    else await permissionApi.componentRoles.create(payload)
+    toast.ok(compRoleEditId.value ? '已更新组件角色' : '已创建组件角色')
+    compRoleModal.value = false
+    await loadComponentRoles()
+  } catch (e) {
+    toast.err(failMsg(e))
+  } finally {
+    compRoleSaving.value = false
+  }
+}
+async function deleteCompRole(r: ComponentRole) {
+  if (r.isSystem) return
+  if (!window.confirm(`删除组件角色「${r.name}」？仍被绑定引用的角色会拒绝删除。`)) return
+  try {
+    await permissionApi.componentRoles.remove(r.id)
+    toast.ok('已删除组件角色')
+    await loadComponentRoles()
+  } catch (e) {
+    toast.err(failMsg(e))
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 平台权限绑定（CRUD）
 // ---------------------------------------------------------------------------
 const bindModal = ref(false)
 const bindSaving = ref(false)
 const bindForm = reactive({
-  subjectType: 'user' as 'user' | 'group',
-  userId: '',
-  groupName: '',
+  subjectType: 'user' as SubjectType,
+  subjectValue: '',
   platformRoleId: '',
   expiresAt: '',
 })
+
+// 候选 = 已有平台绑定里的主体（去重、按类型过滤）。只是省事的候选，手输不受限。
+const subjectOptions = computed(() =>
+  knownSubjects(bindings.value).filter((s) => s.subjectType === bindForm.subjectType),
+)
+const subjectHint = computed(() => subjectInputHint(bindForm.subjectType, bindForm.subjectValue))
+// 「已绑定主体」只读清单：这就是「用户与平台权限」页的全部人员可见性。
+const boundSubjects = computed(() => knownSubjects(bindings.value))
+const roleCountFor = (subjectId: string, subjectType: string) =>
+  bindings.value.filter((b) => b.subjectId === subjectId && b.subjectType === subjectType).length
+
 function resetBindForm() {
   bindForm.subjectType = 'user'
-  bindForm.userId = ''
-  bindForm.groupName = ''
+  bindForm.subjectValue = ''
   bindForm.platformRoleId = ''
   bindForm.expiresAt = ''
 }
@@ -136,16 +219,10 @@ function openCreateBinding() {
   bindModal.value = true
 }
 async function saveBinding() {
-  if (bindForm.subjectType === 'user') {
-    if (!bindForm.userId) {
-      toast.err('请选择用户')
-      return
-    }
-  } else {
-    if (!bindForm.groupName.trim()) {
-      toast.err('请填写用户组名称')
-      return
-    }
+  const invalid = validateSubjectInput(bindForm.subjectType, bindForm.subjectValue)
+  if (invalid) {
+    toast.err(invalid)
+    return
   }
   if (!bindForm.platformRoleId) {
     toast.err('请选择平台角色')
@@ -154,7 +231,7 @@ async function saveBinding() {
   const expiresAt = formatExpiryISO(bindForm.expiresAt)
   const payload = {
     subjectType: bindForm.subjectType,
-    subjectId: bindForm.subjectType === 'user' ? bindForm.userId : bindForm.groupName.trim(),
+    subjectId: bindForm.subjectValue.trim(),
     platformRoleId: bindForm.platformRoleId,
     ...(expiresAt ? { expiresAt } : {}),
   }
@@ -194,7 +271,8 @@ function fmtHeartbeat(s?: string) {
     <div class="page-head">
       <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : '接入管理' }}</h1>
       <div class="sub">
-        平台级管理 · 组件级授权在各组件详情的「权限」Tab
+        平台级管理 · 组件级授权在各组件详情的「权限」Tab · 主体按 Keycloak <code>sub</code> /
+        组路径标识（hub 不存用户表，无人员目录）
       </div>
     </div>
 
@@ -243,6 +321,45 @@ function fmtHeartbeat(s?: string) {
         </table>
       </div>
 
+      <!-- 组件角色（§7.3，B-11 自定义角色） -->
+      <div class="toolbar">
+        <h2 class="h2" style="margin: 0">组件角色</h2>
+        <div class="spacer"></div>
+        <button class="btn btn-pearl" @click="openCreateCompRole">＋ 新建组件角色</button>
+      </div>
+      <div class="card flush">
+        <div v-if="loading" class="loading">加载中…</div>
+        <div v-else-if="componentRoles.length === 0" class="empty">暂无组件角色</div>
+        <table v-else class="table">
+          <thead>
+            <tr>
+              <th>角色</th>
+              <th>权限点</th>
+              <th>类型</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in componentRoles" :key="r.id">
+              <td>
+                <b>{{ r.name }}</b>
+                <div class="muted" v-if="r.description">{{ r.description }}</div>
+              </td>
+              <td>
+                <span v-for="a in r.actions" :key="a" class="chip" style="margin-right: 6px">{{ a }}</span>
+                <span class="muted" v-if="!r.actions || r.actions.length === 0">—</span>
+              </td>
+              <td>{{ r.isSystem ? '系统内置' : '自定义' }}</td>
+              <td class="row-actions">
+                <a v-if="!r.isSystem" @click="openEditCompRole(r)">编辑</a>
+                <a v-if="!r.isSystem" style="color: var(--failed-fg)" @click="deleteCompRole(r)">删除</a>
+                <span v-else class="muted">内置</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- 平台权限绑定 -->
       <div class="toolbar">
         <h2 class="h2" style="margin: 0">平台权限绑定</h2>
@@ -266,15 +383,7 @@ function fmtHeartbeat(s?: string) {
           <tbody>
             <tr v-for="b in bindings" :key="b.id">
               <td><span class="badge">{{ b.subjectType === 'group' ? '组' : '用户' }}</span></td>
-              <td>
-                {{
-                  b.subjectType === 'group'
-                    ? '组：' + (b.subjectId ?? '')
-                    : userById(b.subjectId)
-                      ? userById(b.subjectId)!.name + '（' + userById(b.subjectId)!.email + '）'
-                      : (b.subjectId ?? '').slice(0, 8)
-                }}
-              </td>
+              <td class="mono" :title="subjectLabel(b)">{{ subjectLabel(b) }}</td>
               <td><span class="chip">{{ roleById(b.platformRoleId)?.name ?? b.platformRoleId.slice(0, 8) }}</span></td>
               <td class="mono">{{ b.expiresAt ? new Date(b.expiresAt).toLocaleString('zh-CN', { hour12: false }) : '永久' }}</td>
               <td class="mono">{{ new Date(b.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</td>
@@ -284,28 +393,32 @@ function fmtHeartbeat(s?: string) {
         </table>
       </div>
 
-      <!-- 用户（只读，绑定选择器来源） -->
-      <h2 class="h2">用户</h2>
+      <!-- 已绑定主体（只读；这就是全部的「人员可见性」） -->
+      <h2 class="h2">已绑定主体</h2>
       <div class="card flush">
         <div v-if="loading" class="loading">加载中…</div>
-        <div v-else-if="users.length === 0" class="empty">暂无用户（OIDC 登录后自动注册）</div>
+        <div v-else-if="boundSubjects.length === 0" class="empty">暂无已绑定主体</div>
         <table v-else class="table">
           <thead>
             <tr>
-              <th>用户</th>
-              <th>邮箱</th>
-              <th>加入时间</th>
+              <th>类型</th>
+              <th>主体</th>
+              <th>平台角色数</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in users" :key="u.id">
-              <td><b>{{ u.name }}</b></td>
-              <td class="mono">{{ u.email }}</td>
-              <td class="mono">{{ new Date(u.createdAt).toLocaleDateString('zh-CN') }}</td>
+            <tr v-for="s in boundSubjects" :key="s.subjectType + ':' + s.subjectId">
+              <td><span class="badge">{{ s.subjectType === 'group' ? '组' : '用户' }}</span></td>
+              <td class="mono" :title="s.subjectId">{{ s.subjectId }}</td>
+              <td class="mono">{{ roleCountFor(s.subjectId, s.subjectType) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
+      <p class="muted" style="margin-top: 8px">
+        hub 不保存用户表（规范 §2.2），因此这里只列**已经拥有绑定**的主体。给新人授权时，
+        请在「添加绑定」里直接填入他在 Keycloak 里的 <code>sub</code> —— 不需要他先登录一次。
+      </p>
     </template>
 
     <template v-else>
@@ -364,6 +477,42 @@ function fmtHeartbeat(s?: string) {
       </template>
     </Modal>
 
+    <!-- 组件角色 编辑/新建 -->
+    <Modal :open="compRoleModal" :title="compRoleEditId ? '编辑组件角色' : '新建组件角色'" @close="compRoleModal = false">
+      <div class="field">
+        <label>角色名</label>
+        <input v-model="compRoleForm.name" class="input" type="text" placeholder="如 team-deployer" />
+      </div>
+      <div class="field">
+        <label>描述</label>
+        <input v-model="compRoleForm.description" class="input" type="text" placeholder="可选" />
+      </div>
+      <div class="field">
+        <label>权限点（勾选；与 hub 侧 vocabulary 逐字对齐，拼错即静默 403）</label>
+        <div class="action-groups">
+          <div v-for="g in COMPONENT_ROLE_ACTION_GROUPS" :key="g.label" class="action-group">
+            <div class="action-group-title">{{ g.label }}</div>
+            <label v-for="a in g.actions" :key="a.value" class="action-check">
+              <input
+                type="checkbox"
+                :value="a.value"
+                :checked="compRoleForm.actions.includes(a.value)"
+                @change="toggleCompAction(a.value, ($event.target as HTMLInputElement).checked)"
+              />
+              <span><code>{{ a.value }}</code><span class="muted"> · {{ a.label }}</span></span>
+            </label>
+          </div>
+        </div>
+        <p class="hint">角色至少授予一个权限点；授予空的角色后端会拒绝（它谁也不授权，错误只会在 403 时暴露）。</p>
+      </div>
+      <template #foot>
+        <button class="btn btn-pearl" @click="compRoleModal = false">取消</button>
+        <button class="btn btn-primary" :disabled="compRoleSaving" @click="saveCompRole">
+          {{ compRoleSaving ? '保存中…' : '保存' }}
+        </button>
+      </template>
+    </Modal>
+
     <!-- 平台绑定 添加 -->
     <Modal :open="bindModal" title="添加平台绑定" @close="bindModal = false">
       <div class="field">
@@ -379,21 +528,34 @@ function fmtHeartbeat(s?: string) {
       </div>
 
       <div class="field" v-if="bindForm.subjectType === 'user'">
-        <label>用户</label>
-        <select v-model="bindForm.userId" class="select">
-          <option value="">选择用户</option>
-          <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}（{{ u.email }}）</option>
-        </select>
-      </div>
-      <div class="field" v-else>
-        <label>用户组名称</label>
+        <label>用户 sub</label>
         <input
-          v-model="bindForm.groupName"
+          v-model="bindForm.subjectValue"
           class="input"
           type="text"
-          placeholder="Keycloak 用户组名（如 /sdp-admin）"
+          list="platform-subject-options"
+          placeholder="Keycloak 用户详情里的 sub（uuid），不是用户名"
         />
-        <p class="hint">组主体须带前导斜杠（本 realm groups mapper 为 full.path）。</p>
+        <datalist id="platform-subject-options">
+          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId" />
+        </datalist>
+        <p class="hint" v-if="subjectHint">{{ subjectHint }}</p>
+        <p class="hint" v-else>下拉候选是已绑定过的主体；新主体直接粘贴 <code>sub</code> 即可。</p>
+      </div>
+      <div class="field" v-else>
+        <label>用户组路径</label>
+        <input
+          v-model="bindForm.subjectValue"
+          class="input"
+          type="text"
+          list="platform-subject-options"
+          placeholder="带前导斜杠，如 /sdp-admin"
+        />
+        <datalist id="platform-subject-options">
+          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId" />
+        </datalist>
+        <p class="hint" v-if="subjectHint">{{ subjectHint }}</p>
+        <p class="hint" v-else>组主体须带前导斜杠（本 realm groups mapper 为 full.path）。</p>
       </div>
 
       <div class="field">
@@ -487,5 +649,35 @@ function fmtHeartbeat(s?: string) {
   margin-right: 12px;
   color: var(--accent);
   cursor: pointer;
+}
+.action-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.action-group {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: 10px 12px;
+}
+.action-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-sub);
+  margin-bottom: 6px;
+}
+.action-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.action-check code {
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 12px;
 }
 </style>

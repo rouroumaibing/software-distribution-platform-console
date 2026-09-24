@@ -31,19 +31,25 @@ resources:
 cert:
   secretName: console-tls
 
-# ingress（nginx ingress-controller 终结外部 HTTPS，backend-protocol HTTPS 转发到本 svc 443）。
-# host 默认 www.sdpworkflow.com（生产可 helm -n sdp-workflow --set ingress.host=... 覆盖）。
-# tlsSecretName 同 cert.secretName：生产由运维手工创建（type kubernetes.io/tls，tls.crt/tls.key）。
-ingress:
-  host: "www.sdpworkflow.com"
-  tlsSecretName: console-ingress-tls
+# 对外路由（Envoy Gateway / Gateway API，替代已废弃的 ingress-nginx）：
+# Gateway 网关级资源在 hub chart（frontGateway.*）创建，本 chart 只带自己的
+# HTTPRoute + BackendTLSPolicy（templates/httproute.yaml）。gatewayName 必须与
+# hub chart frontGateway.name 一致（跨 chart 名字引用，改名须两 chart 同步）。
+# host 默认 www.sdpworkflow.com（生产可 helm --set gatewayRoute.hostname=... 覆盖）；
+# TLS 终结在 Gateway https listener（证书 secret 由 hub chart frontGateway.tlsSecretName 引用）。
+gatewayRoute:
+  enabled: true
+  gatewayName: "sdp-gateway"
+  hostname: "www.sdpworkflow.com"
+  # BackendTLSPolicy 校验 console 后端证书用的 CA secret（gen-certs.sh 创建，内含 ca.crt）。
+  caSecretName: "console-tls"
 
 # hub 反代目标（nginx ConfigMap 中 upstream，集群内 svc 名须为 hub，命名空间 sdp-workflow）
 api:
   hubService: hub
   hubPort: "8080"
   # 前端 API baseURL（运行时注入 config.js）。留空时前端兜底 '/api/v1'
-  # （浏览器 -> ingress /api -> console nginx -> hub），一般无需修改。
+  # （浏览器 -> Gateway /api -> console nginx -> hub），一般无需修改。
   baseUrl: ""
 
 # 前端认证配置（chart values -> ConfigMap -> config.js，改这里 helm upgrade 即可，无需重建镜像）。
@@ -55,3 +61,8 @@ auth:
   keycloakIssuerUrl: ""
   keycloakClientId: ""
   keycloakRedirectUri: ""
+  # 登录说明页（/login-hint）展示的预置账号。与 hub chart 的
+  # keycloak-realm-configmap.yaml 预置用户 admin 同源——改密码必须两处同步；
+  # 置空则说明页不展示凭证块（生产建议置空或改成真实初始值）。
+  loginHintUser: "admin"
+  loginHintPassword: "sdp@12345"

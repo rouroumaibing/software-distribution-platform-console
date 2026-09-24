@@ -1,53 +1,53 @@
 <script setup lang="ts">
-// 权限 Tab：组件级 RBAC（role-bindings），§7 主题模型。
+// 权限 Tab：组件级 RBAC（role-bindings），§7 主体模型。
 // 主体支持 user / group 两种 subject_type；角色选择器使用 §7 component_roles
-// （内置 viewer/editor/approver/admin + 组织自定义），不再使用 V1 roles。
-// 平台级用户/角色在「平台管理」。
-import { onMounted, reactive, ref } from 'vue'
+// （内置 viewer/editor/approver/admin + 组织自定义）。
+//
+// D3 之后 hub 不存用户表，控制台**没有用户目录**：主体从「已绑定主体」下拉候选里
+// 挑，或直接手输 `sub` / 组路径。平台级授权在「平台管理」。
+import { computed, onMounted, reactive, ref } from 'vue'
 import Modal from '@/components/Modal.vue'
+import { permissionApi, type ComponentRole, type ComponentRoleBinding } from '@/api/permission'
 import {
-  permissionApi,
-  type User,
-  type Role,
-  type ComponentRole,
-  type ComponentRoleBinding,
-} from '@/api/permission'
+  failMsg,
+  knownSubjects,
+  subjectInputHint,
+  subjectLabel,
+  validateSubjectInput,
+  type SubjectType,
+} from '@/utils/permission'
 import { toast } from '@/utils/toast'
 
 const props = defineProps<{ componentId: string }>()
 
 const bindings = ref<ComponentRoleBinding[]>([])
-const users = ref<User[]>([])
-const roles = ref<Role[]>([]) // V1 legacy，仅用于旧数据回显
 const componentRoles = ref<ComponentRole[]>([]) // §7 角色
 const loading = ref(true)
 const modal = ref(false)
 const saving = ref(false)
 
 const form = reactive({
-  subjectType: 'user' as 'user' | 'group',
-  userId: '',
-  groupName: '',
+  subjectType: 'user' as SubjectType,
+  subjectValue: '',
   componentRoleId: '',
 })
 
+// 下拉候选 = 本组件**已绑定过**的主体（去重、按当前类型过滤）。
+// 它只是省事的候选，不是白名单 —— 手输任何合法主体都允许。
+const subjectOptions = computed(() =>
+  knownSubjects(bindings.value).filter((s) => s.subjectType === form.subjectType),
+)
+const subjectHint = computed(() => subjectInputHint(form.subjectType, form.subjectValue))
+
 function resetForm() {
   form.subjectType = 'user'
-  form.userId = ''
-  form.groupName = ''
+  form.subjectValue = ''
   form.componentRoleId = ''
 }
 
 onMounted(async () => {
   try {
-    const [u, r, cr] = await Promise.all([
-      permissionApi.users.list({ page: 1, pageSize: 100 }),
-      permissionApi.roles.list(),
-      permissionApi.componentRoles.list(),
-    ])
-    users.value = u.items
-    roles.value = r
-    componentRoles.value = cr
+    componentRoles.value = await permissionApi.componentRoles.list()
     await load()
   } finally {
     loading.value = false
@@ -59,76 +59,59 @@ async function load() {
 }
 
 async function save() {
-  if (form.subjectType === 'user') {
-    if (!form.userId) {
-      toast.err('请选择用户')
-      return
-    }
-  } else {
-    if (!form.groupName.trim()) {
-      toast.err('请填写用户组名称')
-      return
-    }
+  const invalid = validateSubjectInput(form.subjectType, form.subjectValue)
+  if (invalid) {
+    toast.err(invalid)
+    return
   }
   if (!form.componentRoleId) {
     toast.err('请选择组件角色')
     return
   }
-  const payload = {
-    subjectType: form.subjectType,
-    subjectId: form.subjectType === 'user' ? form.userId : form.groupName.trim(),
-    componentRoleId: form.componentRoleId,
-  }
   saving.value = true
   try {
-    await permissionApi.bindings.create(props.componentId, payload)
+    await permissionApi.bindings.create(props.componentId, {
+      subjectType: form.subjectType,
+      subjectId: form.subjectValue.trim(),
+      componentRoleId: form.componentRoleId,
+    })
     toast.ok('已添加绑定')
     modal.value = false
     resetForm()
     await load()
+  } catch (e) {
+    toast.err(failMsg(e))
   } finally {
     saving.value = false
   }
 }
 
 async function remove(id: string) {
-  await permissionApi.bindings.remove(id)
-  toast.ok('已解绑')
-  await load()
-}
-
-const userById = (id?: string) => users.value.find((u) => u.id === id)
-const roleById = (id?: string) => roles.value.find((r) => r.id === id)
-const componentRoleById = (id?: string) => componentRoles.value.find((r) => r.id === id)
-
-// 主体显示：优先 §7 subjectType，旧数据回退到 V1 userId。
-function subjectLabel(b: ComponentRoleBinding): string {
-  if (b.subjectType === 'group') return `组：${b.subjectId ?? ''}`
-  if (b.subjectType === 'user') {
-    const u = userById(b.subjectId)
-    return u ? `${u.name}（${u.email}）` : (b.subjectId ?? '').slice(0, 8)
+  try {
+    await permissionApi.bindings.remove(id)
+    toast.ok('已解绑')
+    await load()
+  } catch (e) {
+    toast.err(failMsg(e))
   }
-  // V1 legacy 回显
-  const u = userById(b.userId)
-  return u ? `${u.name}（${u.email}）` : (b.userId ?? '').slice(0, 8)
 }
 
-// 角色显示：优先 §7 componentRoleId，旧数据回退到 V1 roleId。
-function roleLabel(b: ComponentRoleBinding): string {
-  if (b.componentRoleId) return componentRoleById(b.componentRoleId)?.name ?? b.componentRoleId.slice(0, 8)
-  if (b.roleId) return roleById(b.roleId)?.name ?? b.roleId.slice(0, 8)
-  return '—'
-}
-
-const subjectTypeBadge = (b: ComponentRoleBinding) =>
-  b.subjectType === 'group' ? '组' : b.subjectType === 'user' ? '用户' : '用户(V1)'
+const componentRoleById = (id?: string) => componentRoles.value.find((r) => r.id === id)
+const roleLabel = (b: ComponentRoleBinding) =>
+  b.componentRoleId ? (componentRoleById(b.componentRoleId)?.name ?? b.componentRoleId.slice(0, 8)) : '—'
+const subjectTypeBadge = (b: ComponentRoleBinding) => (b.subjectType === 'group' ? '组' : '用户')
 </script>
 
 <template>
   <div>
     <div class="perm-note">
-      这里管理<b>对这个组件</b>的授权（role-bindings）；平台级用户与角色在左侧
+      这里管理<b>对这个组件</b>的授权（role-bindings）；平台级权限在左侧
       <b>平台管理 → 用户与平台权限</b>。
+    </div>
+    <div class="perm-note">
+      主体按 Keycloak 的 <b>`sub`</b> 标识（用户组按组路径）。hub <b>不存用户表</b>，
+      所以这里没有人员名单可拉 —— 下拉候选来自本组件<b>已绑定过</b>的主体，新主体请直接填入
+      `sub`（在 Keycloak 用户详情里复制）。
     </div>
     <div class="perm-note warn">
       <b>自审拦截：</b>组件 owner 触发含审批节点的流水线后，<b>不能审批自己触发的这次运行</b>。
@@ -156,7 +139,7 @@ const subjectTypeBadge = (b: ComponentRoleBinding) =>
         <tbody>
           <tr v-for="b in bindings" :key="b.id">
             <td><span class="badge">{{ subjectTypeBadge(b) }}</span></td>
-            <td>{{ subjectLabel(b) }}</td>
+            <td class="mono" :title="subjectLabel(b)">{{ subjectLabel(b) }}</td>
             <td><span class="chip">{{ roleLabel(b) }}</span></td>
             <td class="mono">{{ new Date(b.grantedAt).toLocaleString('zh-CN', { hour12: false }) }}</td>
             <td><a style="color: var(--failed-fg)" @click="remove(b.id)">解绑</a></td>
@@ -179,22 +162,37 @@ const subjectTypeBadge = (b: ComponentRoleBinding) =>
       </div>
 
       <div class="field" v-if="form.subjectType === 'user'">
-        <label>用户</label>
-        <select v-model="form.userId" class="select">
-          <option value="">选择用户</option>
-          <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}（{{ u.email }}）</option>
-        </select>
+        <label>用户 sub</label>
+        <input
+          v-model="form.subjectValue"
+          class="input"
+          type="text"
+          list="component-subject-options"
+          placeholder="Keycloak 用户详情里的 sub（uuid），不是用户名"
+        />
+        <datalist id="component-subject-options">
+          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId" />
+        </datalist>
+        <p class="hint" v-if="subjectHint">{{ subjectHint }}</p>
+        <p class="hint" v-else-if="subjectOptions.length === 0">
+          本组件还没有绑定过用户，直接粘贴 `sub` 即可。
+        </p>
       </div>
 
       <div class="field" v-else>
-        <label>用户组名称</label>
+        <label>用户组路径</label>
         <input
-          v-model="form.groupName"
+          v-model="form.subjectValue"
           class="input"
           type="text"
-          placeholder="Keycloak 用户组名（如 platform-eng）"
+          list="component-subject-options"
+          placeholder="带前导斜杠，如 /sdp-admin"
         />
-        <p class="hint">用户组来自 Keycloak，hub 当前不提供组目录，请填写准确的组名。</p>
+        <datalist id="component-subject-options">
+          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId" />
+        </datalist>
+        <p class="hint" v-if="subjectHint">{{ subjectHint }}</p>
+        <p class="hint" v-else>组值取自 token 的 groups claim，本 realm 为 `full.path` ⇒ 必须带前导斜杠。</p>
       </div>
 
       <div class="field">

@@ -1,18 +1,15 @@
 import { http } from './http'
-import { createCrud, listPaged } from './crud'
-import type { Envelope, Pagination } from './http'
+import { createCrud } from './crud'
+import type { Envelope } from './http'
 
-export interface User {
-  id: string
-  orgId: string
-  email: string
-  name: string
-  createdAt: string
-}
+// 注意：这里**没有 User 类型，也没有 /users 端点**。
+// hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2 / D3），所以控制台拿不到
+// 「系统里有哪些人」这份目录。授权表单改为「下拉已绑定主体 + 手输 sub」，
+// 见 utils/permission.ts 的 knownSubjects / validateSubjectInput。
 
-// V1 legacy roles table (Viewer/Editor/Admin) — retained for the migration
-// window so legacy role-bindings can still be displayed. New grants use the
-// §7 ComponentRole model below.
+// V1 legacy roles table (Viewer/Editor/Admin) — 只读保留。
+// D3 之后 `component_role_bindings.role_id` 已删，所以这些角色**不再可被绑定**；
+// 保留列表只为历史行展示与 /roles 端点兼容。新的授权一律走下面的 ComponentRole。
 export interface Role {
   id: string
   orgId?: string
@@ -32,12 +29,13 @@ export interface ComponentRole {
   isSystem: boolean
 }
 
-// §7 subject model (authoritative as of P3):
+// §7 subject model:
 //   - subjectType : 'user' | 'group'
-//   - subjectId   : user id (uuid) | Keycloak group name
+//   - subjectId   : Keycloak `sub`（user）| 组路径（group，带前导斜杠，§5.3）
 //   - componentRoleId : the granted component_roles role
-// V1 legacy fields (userId/roleId) may still appear on rows migrated from the
-// old single-roles model; the UI falls back to them for display only.
+//
+// D3 删掉了 V1 的 userId / roleId 两列，所以这里不再有「旧数据回退字段」——
+// 每一行都必然是 §7 主体绑定。
 export interface ComponentRoleBinding {
   id: string
   componentId: string
@@ -45,9 +43,6 @@ export interface ComponentRoleBinding {
   subjectType?: 'user' | 'group'
   subjectId?: string
   componentRoleId?: string
-  // V1 legacy (read-only, present on old rows)
-  userId?: string
-  roleId?: string
   grantedBy?: string
   grantedAt: string
 }
@@ -64,7 +59,7 @@ export interface PlatformRole {
   createdAt: string
 }
 
-// 平台级绑定（C-10 `/platform-role-bindings`）：把主体（user / Keycloak 组）
+// 平台级绑定（C-10 `/platform-role-bindings`）：把主体（user `sub` / Keycloak 组）
 // 关联到某个 PlatformRole。expiresAt 为 null = 永久；非空且已过期则在
 // ListMatching 中被过滤（见 ACCOUNT-PERMISSION-MODEL §7.4 / §10 #15）。
 export interface PlatformRoleBinding {
@@ -77,23 +72,19 @@ export interface PlatformRoleBinding {
   createdAt: string
 }
 
-const userCrud = createCrud<User>('/users')
-
 export const permissionApi = {
-  users: {
-    ...userCrud,
-    list: (p?: Pagination) => listPaged<User>('/users', p),
-  },
-
   // V1 角色是种子数据(Viewer/Editor/Admin),只读,没有增删改接口。
+  // ⚠️ 不可用于新建绑定（role_id 列已随 D3 删除）。
   roles: {
     list: () => http.get<{ data: Role[] }>('/roles').then((r) => r.data.data),
   },
 
   // §7 组件角色(component_roles):内置 viewer/editor/approver/admin + 组织自定义。
-  // 绑定选择器使用这一组而不是 V1 roles。
+  // 绑定选择器使用这一组；写端点（create/update/remove）需要平台级 user:manage，
+  // 故挂在「平台管理 → 用户与平台权限」里管理（与平台角色同级）。
   componentRoles: {
     list: () => http.get<{ data: ComponentRole[] }>('/component-roles').then((r) => r.data.data),
+    ...createCrud<ComponentRole>('/component-roles'),
   },
 
   bindings: {

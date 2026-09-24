@@ -21,6 +21,25 @@
 | `pnpm clean -- --no-stop` | 同上，但跳过停服务（CI / 无服务场景；也可用 `NO_STOP=1 pnpm clean`） |
 | `pnpm clean:deep` | 删生成物 + 全部下载依赖（`node_modules/ .pnpm-store/`）（`scripts/clean.sh --deep`） |
 
+## 契约测试（node 冒烟，数量即契约）
+
+前端契约不跑 vue-tsc/vite，而是 `scripts/*.mjs` 的 node 冒烟断言；**用例数量本身是契约**——改断言条数要在 PR 里说明理由。`pnpm test` 聚合跑全部套件：
+
+| 命令 | 覆盖范围 |
+| --- | --- |
+| `pnpm test` | 聚合执行以下全部契约套件 |
+| `pnpm test:runcenter` | 运行中心（RunsTab / 执行模型与异常分支展示） |
+| `pnpm test:theme-search` | 暗色主题（C-02 双主题令牌）+ ⌘K 全局搜索（C-01） |
+| `pnpm test:pipeline` | 流水线全生命周期 UI（C-12：列表/编辑器/executionMode/删除 409 reasons） |
+| `pnpm test:service-tree` | 服务树页交互契约 |
+| `pnpm test:platform-perm` | 平台/组件级权限管理 UI（含 `validateSubjectInput` / `failMsg`（409 `reasons` 优先）等 `utils/permission.ts` 纯函数契约） |
+
+## 认证（Keycloak 真对接，2026-09-23 起本地 deploy 默认开启）
+
+- 未登录访问任何受保护路由 → 先进 `/login-hint`（展示预置账号 + 「临时初始密码，登录后须重置」批注）→ 点「继续登录」跳 Keycloak 托管页（Authorization Code + PKCE），回调 `/auth/callback` 后入站。
+- 运行时配置经 chart values `auth.*` → ConfigMap `config.js` → `window.__APP_CONFIG__` 注入（`VITE_AUTH_DISABLED=false` + issuer/clientId/redirectUri 与 hub 侧同源，issuer 三方一字不差，详见 `docs/hub/KEYCLOAK.md` §6.5）。dev 旁路 `VITE_AUTH_DISABLED=true` 仍可用。
+- ⚠️ chart 模板对 bool 值做了 `toString` 归一化（helm `--set xxx=false` 解析成 bool，`false | default "true"` 会被 sprig 当零值顶掉——勿回退成裸 `default`）。
+
 ## TLS 证书（交付契约 / 本地自签）
 
 console 的 HTTPS 由**两个集群内 Secret** 承载，**镜像与交付包不携带任何证书或私钥**：

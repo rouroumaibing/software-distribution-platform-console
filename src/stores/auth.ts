@@ -1,13 +1,16 @@
 import { defineStore } from 'pinia'
 import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts'
 
-// 配置解析优先级：window.__APP_CONFIG__（容器运行时由 envsubst 生成，见
-// build/console/images/config.js.template）> import.meta.env（构建期注入，dev 用）。
+// 配置解析优先级：window.__APP_CONFIG__（容器运行时由 console chart 的
+// templates/config.yaml 渲染 /usr/share/nginx/html/config.js 注入）> import.meta.env（构建期注入，dev 用）。
 interface AppConfig {
   VITE_AUTH_DISABLED?: string
   VITE_KEYCLOAK_ISSUER_URL?: string
   VITE_KEYCLOAK_CLIENT_ID?: string
   VITE_KEYCLOAK_REDIRECT_URI?: string
+  // 登录说明页（/login-hint）展示的预置账号；空 = 不展示凭证块（生产可置空）。
+  VITE_LOGIN_HINT_USER?: string
+  VITE_LOGIN_HINT_PASSWORD?: string
 }
 const runtimeCfg: AppConfig = (window as unknown as { __APP_CONFIG__?: AppConfig }).__APP_CONFIG__ ?? {}
 const cfg = (key: keyof AppConfig): string | undefined => runtimeCfg[key] ?? import.meta.env[key]
@@ -47,6 +50,10 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthenticated: (state) => !!state.user && !state.user.expired,
     accessToken: (state) => state.user?.access_token ?? null,
+    // 登录说明页（/login-hint）用：预置账号展示值与 Keycloak issuer（空 = 未配置）。
+    loginHintUser: () => cfg('VITE_LOGIN_HINT_USER') ?? '',
+    loginHintPassword: () => cfg('VITE_LOGIN_HINT_PASSWORD') ?? '',
+    keycloakIssuer: () => cfg('VITE_KEYCLOAK_ISSUER_URL') ?? '',
   },
 
   actions: {

@@ -1,0 +1,51 @@
+{{- if .Values.gatewayRoute.enabled }}
+# console 对外路由（Envoy Gateway / Gateway API）：替代已废弃的 ingress-nginx Ingress。
+#
+# 与原 Ingress 等价：host www.sdpworkflow.com、Prefix /、后端 console svc 443（TLS）。
+# Gateway（GatewayClass/EnvoyProxy/Gateway）归运行方/本地脚手架（根目录 deploy/gateway-sdp.yaml，
+# 不随仓分发），本 chart 按名字引用（gatewayRoute.gatewayName，可 --set 覆盖）——保持独立可装：
+# 没有网关时本路由只是 Pending，不影响 console 自身运行。
+# parentRefs 不指定 sectionName => 同时挂 http/https listener。
+#
+# 原 nginx 注记 `backend-protocol: HTTPS` 由下方 BackendTLSPolicy 表达（Gateway API 正解）：
+# envoy 用 sdp-local-ca（console-tls secret 的 ca.crt）校验 console 后端证书。
+# validation.hostname 省略 = 默认用后端 svc FQDN（console.sdp-workflow.svc.cluster.local），
+# gen-certs.sh 的 server 证书 SAN 已覆盖该 FQDN 链与 www.sdpworkflow.com。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: console
+  namespace: {{ .Values.namespace }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gatewayRoute.gatewayName }}
+  hostnames:
+    - {{ .Values.gatewayRoute.hostname }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ .Values.basic.component }}
+          port: {{ .Values.service.externPort }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: console
+  namespace: {{ .Values.namespace }}
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ .Values.basic.component }}
+  validation:
+    # BackendTLSPolicy v1 里 hostname **必填**（v1alpha2 时代可省略）。
+    # 取后端 svc FQDN —— gen-certs.sh 的 SAN 覆盖 console.<ns>.svc.cluster.local 链。
+    hostname: {{ .Values.basic.component }}.{{ .Values.namespace }}.svc.cluster.local
+    caCertificateRefs:
+      - group: ""
+        kind: Secret
+        name: {{ .Values.gatewayRoute.caSecretName }}
+{{- end }}
