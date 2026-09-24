@@ -64,6 +64,8 @@ const router = createRouter({
         // ---- 平台管理 ----
         { path: 'admin/permissions', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'permissions' }, meta: { title: '用户与平台权限' } },
         { path: 'admin/targets', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'targets' }, meta: { title: '接入管理' } },
+        { path: 'admin/credentials', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'credentials' }, meta: { title: '凭据管理' } },
+        { path: 'admin/targets/:targetId/agent-ops', component: () => import('@/views/AgentOpsView.vue'), props: true, meta: { title: '操作台账' } },
         { path: 'admin/clusters', redirect: '/admin/targets' },
 
         // ---- 旧 flat 菜单路由 → redirect（deep link 兼容）----

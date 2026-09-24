@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 平台管理（IA v2）：用户与平台权限（平台级 RBAC，C-10 端点）/ 接入管理。
+// 平台管理（IA v2）：用户与平台权限（平台级 RBAC，C-10 端点）/ 接入管理 / 凭据管理。
 // 组件级授权在各组件详情的「权限」Tab —— 权限双轨的平台侧半边。
 //
 // D3 之后 hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2），所以本页**没有用户目录**，
@@ -7,6 +7,7 @@
 // 的 (b′)：下拉候选 = 绑定表里去重出的「已绑定主体」，新主体靠**手输** `sub` / 组路径。
 import { computed, onMounted, reactive, ref } from 'vue'
 import Modal from '@/components/Modal.vue'
+import CredentialsView from '@/views/CredentialsView.vue'
 import { permissionApi, type ComponentRole, type PlatformRole, type PlatformRoleBinding } from '@/api/permission'
 import { targetApi, type Target } from '@/api/target'
 import { toast } from '@/utils/toast'
@@ -22,7 +23,7 @@ import {
   type SubjectType,
 } from '@/utils/permission'
 
-const props = defineProps<{ section: 'permissions' | 'targets' }>()
+const props = defineProps<{ section: 'permissions' | 'targets' | 'credentials' }>()
 
 const roles = ref<PlatformRole[]>([]) // §7.2 平台角色（C-10，可管理）
 const bindings = ref<PlatformRoleBinding[]>([]) // 平台级绑定（C-10，可管理）
@@ -46,10 +47,11 @@ onMounted(async () => {
   try {
     if (props.section === 'permissions') {
       await Promise.all([loadRoles(), loadBindings(), loadComponentRoles()])
-    } else {
+    } else if (props.section === 'targets') {
       const c = await targetApi.list({ page: 1, pageSize: 100 })
       targets.value = c.items
     }
+    // section === 'credentials' → <CredentialsView/> 自行加载，这里无需取数
   } finally {
     loading.value = false
   }
@@ -269,8 +271,11 @@ function fmtHeartbeat(s?: string) {
 <template>
   <div>
     <div class="page-head">
-      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : '接入管理' }}</h1>
-      <div class="sub">
+      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : section === 'targets' ? '接入管理' : '凭据管理' }}</h1>
+      <div class="sub" v-if="section === 'credentials'">
+        凭据注册与加密存储：hub 侧 AES-GCM 信封加密，明文不回流 console（仅创建/修改请求携带）。
+      </div>
+      <div class="sub" v-else>
         平台级管理 · 组件级授权在各组件详情的「权限」Tab · 主体按 Keycloak <code>sub</code> /
         组路径标识（hub 不存用户表，无人员目录）
       </div>
@@ -279,6 +284,7 @@ function fmtHeartbeat(s?: string) {
     <div class="tabs" style="margin-top: 0">
       <router-link class="tab" :class="{ active: section === 'permissions' }" to="/admin/permissions">用户与平台权限</router-link>
       <router-link class="tab" :class="{ active: section === 'targets' }" to="/admin/targets">接入管理</router-link>
+      <router-link class="tab" :class="{ active: section === 'credentials' }" to="/admin/credentials">凭据管理</router-link>
     </div>
 
     <template v-if="section === 'permissions'">
@@ -421,7 +427,7 @@ function fmtHeartbeat(s?: string) {
       </p>
     </template>
 
-    <template v-else>
+    <template v-else-if="section === 'targets'">
       <div class="card flush">
         <div v-if="loading" class="loading">加载中…</div>
         <div v-else-if="targets.length === 0" class="empty">暂无接入目标。Runner 上线后自动注册。</div>
@@ -434,6 +440,7 @@ function fmtHeartbeat(s?: string) {
               <th>状态</th>
               <th>Agent 版本</th>
               <th>最近心跳</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -448,10 +455,17 @@ function fmtHeartbeat(s?: string) {
               </td>
               <td class="mono">{{ c.agentVersion || '—' }}</td>
               <td class="mono">{{ fmtHeartbeat(c.lastHeartbeatAt) }}</td>
+              <td class="row-actions">
+                <router-link :to="`/admin/targets/${c.id}/agent-ops`">操作记录</router-link>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
+    </template>
+
+    <template v-else-if="section === 'credentials'">
+      <CredentialsView />
     </template>
 
     <!-- 平台角色 编辑/新建 -->
@@ -586,6 +600,13 @@ function fmtHeartbeat(s?: string) {
 
 <style scoped>
 /* 表单相关类与 PermissionsTab 同源（tokens.css 未提供全局表单类，故在此 scoped 定义） */
+.tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+.tab {
+  padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 600;
+  color: var(--text-sub); cursor: pointer; border: 1px solid transparent;
+}
+.tab:hover { background: var(--surface-2); color: var(--text); }
+.tab.active { background: var(--accent-soft); color: var(--accent); }
 .field {
   margin-bottom: 14px;
 }
