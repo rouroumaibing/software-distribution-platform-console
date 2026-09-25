@@ -562,6 +562,86 @@ function goComponent(c: Component) {
 }
 
 // ---------------------------------------------------------------------------
+// 删除流程（STATUS §2 #13：服务树删除入口 UI）
+// 后端契约（DELETE-CONTRACT §1.3）：活跃运行存在 → 409 + {reasons}，
+// 其余一律级联软删。前端只负责「确认 + 展示拒绝原因」，不自行判定能否删。
+// ---------------------------------------------------------------------------
+const deleteTarget = ref<TreeNode>()
+const deleteBusy = ref(false)
+const deleteBlockedReasons = ref<string[]>([])
+
+/** 打开删除确认框；先清空上一次的拒绝原因。 */
+function openDelete(node: TreeNode) {
+  deleteTarget.value = node
+  deleteBlockedReasons.value = []
+}
+
+/** 从内存树里移除一个节点（成功删除后调用，避免再打一次全量刷新）。 */
+function removeNodeFromTree(node: TreeNode) {
+  if (node.kind === 'org') {
+    roots.value = roots.value.filter((n) => n.id !== node.id)
+    return
+  }
+  if (node.kind === 'service') {
+    const parent = roots.value.find((o) => o.children.some((c) => c.id === node.id))
+    if (parent) parent.children = parent.children.filter((c) => c.id !== node.id)
+    return
+  }
+  // component：找到它所属的服务节点，从 children 里摘掉。
+  for (const o of roots.value) {
+    for (const s of o.children) {
+      if (s.children.some((c) => c.id === node.id)) {
+        s.children = s.children.filter((c) => c.id !== node.id)
+        return
+      }
+    }
+  }
+}
+
+/** 后端 409 拒绝原因：优先读结构化 reasons 列表，回退到 error 文案。 */
+function blockedReasons(e: any): string[] {
+  const reasons = e?.response?.data?.reasons
+  if (Array.isArray(reasons) && reasons.length > 0) return reasons
+  const msg = e?.response?.data?.error ?? errText(e)
+  return msg ? [msg] : ['删除被拒绝']
+}
+
+async function confirmDelete() {
+  const node = deleteTarget.value
+  if (!node) return
+  deleteBusy.value = true
+  deleteBlockedReasons.value = []
+  try {
+    if (node.kind === 'org') await orgApi.remove(node.id)
+    else if (node.kind === 'service') await catalogApi.remove(node.id)
+    else await componentApi.remove(node.id)
+
+    removeNodeFromTree(node)
+    if (selected.value?.id === node.id) selected.value = undefined
+    toast.ok(`已删除${kindLabel(node.kind)}「${node.name}」`)
+    deleteTarget.value = undefined
+  } catch (e: any) {
+    if (e?.response?.status === 409) {
+      // 活跃运行等硬规则拒绝：把 reasons 留在确认框里，让用户看清为什么不能删，
+      // 不自动关弹窗（关了就看不到原因了）。
+      deleteBlockedReasons.value = blockedReasons(e)
+    } else {
+      toast.err('删除失败：' + errText(e))
+      deleteTarget.value = undefined
+    }
+  } finally {
+    deleteBusy.value = false
+  }
+}
+
+function kindLabel(kind: TreeNode['kind']): string {
+  return kind === 'org' ? '组织' : kind === 'service' ? '服务' : '组件'
+}
+
+/** 删除确认框是否展示（org 删除走平台守卫，前端无需感知，照常调 remove）。 */
+const showDeleteConfirm = computed(() => deleteTarget.value !== undefined)
+
+// ---------------------------------------------------------------------------
 // 展示辅助
 // ---------------------------------------------------------------------------
 /** 行首标记：展开态 ▾ / 折叠态 ▸ / 加载中 ⋯ / 失败 ⚠ / 叶子 ◦。 */
@@ -679,6 +759,7 @@ function rowHint(node: TreeNode): string {
                 展开
               </button>
               <button class="btn btn-primary btn-sm" @click="openServiceDialog">＋ 添加服务</button>
+              <button class="btn btn-danger btn-sm" @click="openDelete(selected)">🗑 删除组织</button>
             </div>
           </template>
           <template v-else-if="selected.kind === 'service' && selected.service">
@@ -696,6 +777,7 @@ function rowHint(node: TreeNode): string {
                 加载组件
               </button>
               <button class="btn btn-primary btn-sm" @click="compDialog = true">＋ 添加组件</button>
+              <button class="btn btn-danger btn-sm" @click="openDelete(selected)">🗑 删除服务</button>
             </div>
           </template>
           <template v-else-if="selected.kind === 'component' && selected.component">
@@ -706,6 +788,7 @@ function rowHint(node: TreeNode): string {
             </div>
             <div class="toolbar">
               <button class="btn btn-primary btn-sm" @click="goComponent(selected.component!)">进入组件详情 →</button>
+              <button class="btn btn-danger btn-sm" @click="openDelete(selected)">🗑 删除组件</button>
             </div>
           </template>
         </template>
@@ -791,6 +874,29 @@ function rowHint(node: TreeNode): string {
         </button>
       </template>
     </Modal>
+
+    <!-- 删除确认（STATUS §2 #13：服务树删除入口 UI） -->
+    <Modal :open="showDeleteConfirm" :title="`删除${deleteTarget ? kindLabel(deleteTarget.kind) : ''}`" @close="deleteTarget = undefined">
+      <p>
+        确定要删除{{ deleteTarget ? kindLabel(deleteTarget.kind) : '' }}
+        「<b>{{ deleteTarget?.name }}</b>」吗？此操作不可恢复（资源走软删，保留审计轨迹）。
+      </p>
+      <p v-if="deleteTarget?.kind !== 'component'" class="hint">
+        其下的服务 / 组件 / 配置将一并级联删除；存在活跃运行时会被后端拒绝（见下方原因）。
+      </p>
+      <p v-else class="hint">
+        组件下的环境、配置、制品将一并清理；存在活跃运行时会被后端拒绝（见下方原因）。
+      </p>
+      <ul v-if="deleteBlockedReasons.length" class="reasons">
+        <li v-for="r in deleteBlockedReasons" :key="r">{{ r }}</li>
+      </ul>
+      <template #foot>
+        <button class="btn btn-pearl" :disabled="deleteBusy" @click="deleteTarget = undefined">取消</button>
+        <button class="btn btn-danger" :disabled="deleteBusy" @click="confirmDelete">
+          {{ deleteBusy ? '删除中…' : '删除' }}
+        </button>
+      </template>
+    </Modal>
   </div>
 </template>
 
@@ -829,6 +935,11 @@ function rowHint(node: TreeNode): string {
 }
 .hit-path { font-size: 11px; color: var(--sub); margin-top: 2px; }
 .detail-panel { min-height: 300px; }
+.btn-danger { background: var(--failed-fg); border-color: var(--failed-fg); color: #fff; }
+.btn-danger:hover { filter: brightness(0.94); }
+.btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+.reasons { margin: 8px 0 0; padding-left: 18px; color: var(--failed-fg); font-size: 13px; }
+.reasons li { margin: 2px 0; }
 .kv-list { margin-top: 12px; }
 .kv-list .row {
   display: flex; justify-content: space-between; gap: 16px;

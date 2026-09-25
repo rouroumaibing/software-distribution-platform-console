@@ -183,6 +183,10 @@ export interface VersionRollbackResult {
 
 export const pipelineApi = {
   ...crud,
+  // 全局流水线列表：P0-2 已落地（hub GET /pipelines）。替代原先前端「组织→服务→组件→流水线」
+  // 四级遍历聚合（useResourceMap.buildResourceIndex 的 stopgap）。M1 规模下默认拉一页足够，
+  // 真超量再翻页遍历。
+  listGlobal: (p?: Pagination) => listPaged<Pipeline>('/pipelines', p),
   listByComponent: (componentId: string, p?: Pagination) =>
     listPaged<Pipeline>(`/components/${componentId}/pipelines`, p),
 

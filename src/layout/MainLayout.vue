@@ -9,17 +9,36 @@
 //      原实现是固定深蓝，等于暗色主题下唯一"不跟着变"的一块，且与 light 相冲突。
 //   ② 去掉选中项的 3px 竖条（§7.1 / §9.5 明令"不用 3px 竖条"），改为
 //      「圆角块 + --rail-active-bg 底 + --rail-active-fg 字」。
-import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { toggleGray, toggleTheme, useTheme } from '@/composables/useTheme'
 import { themeToggleLabel, themeToggleTitle } from '@/utils/theme'
 import { openPalette } from '@/composables/useGlobalSearch'
+import { notificationApi, type Notification } from '@/api/notification'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const { theme } = useTheme()
 const collapsed = ref(false)
+
+// ---- 通知中心（§2 #7）：铃铛消费待审批运行流 ----
+const notifications = ref<Notification[]>([])
+const notifOpen = ref(false)
+const unread = computed(() => notifications.value.length)
+
+async function loadNotifications() {
+  notifications.value = await notificationApi.list().catch(() => [])
+}
+function toggleNotif() {
+  notifOpen.value = !notifOpen.value
+}
+function openNotif(n: Notification) {
+  notifOpen.value = false
+  router.push(n.link)
+}
+onMounted(loadNotifications)
 
 // 图标是**本地常量**的 SVG 片段（不含任何用户输入），故可安全用 v-html 注入；
 // 路径照抄原型 CONSOLE-UI-原型.html 的 ICON 表，线宽/圆角由 CSS 统一控制。
@@ -145,6 +164,28 @@ async function logout() {
           >
             灰阶
           </button>
+          <div class="notif">
+            <button class="tbtn notif-btn" title="通知中心" @click="toggleNotif()">
+              <span
+                class="si"
+                v-html="`<svg viewBox='0 0 24 24'><path d='M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9'/><path d='M13.7 21a2 2 0 0 1-3.4 0'/></svg>`"
+              ></span>
+              <span v-if="unread > 0" class="badge">{{ unread > 99 ? '99+' : unread }}</span>
+            </button>
+            <div v-if="notifOpen" class="notif-pop">
+              <div class="np-head">
+                <span>通知</span>
+                <span class="sub">{{ unread }} 条待办</span>
+              </div>
+              <div v-if="notifications.length === 0" class="np-empty">暂无通知</div>
+              <ul v-else class="np-list">
+                <li v-for="n in notifications" :key="n.id" @click="openNotif(n)">
+                  <div class="np-title">{{ n.title }}</div>
+                  <div class="np-body">{{ n.body }}</div>
+                </li>
+              </ul>
+            </div>
+          </div>
           <div class="user-chip">
             <span class="avatar">{{ userName.slice(0, 2).toUpperCase() }}</span>
             <span class="uname">{{ userName }}</span>
@@ -236,6 +277,32 @@ async function logout() {
 .si :deep(svg) { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; }
 
 .user-chip { display: flex; align-items: center; gap: 8px; margin-left: 6px; }
+
+/* ---------- 通知中心（§2 #7） ---------- */
+.notif { position: relative; }
+.notif-btn { position: relative; }
+.notif-btn .badge {
+  position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
+  padding: 0 4px; border-radius: 9px; background: var(--failed-fg); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+}
+.notif-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; width: 320px; z-index: 50;
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14); overflow: hidden;
+}
+.np-head {
+  display: flex; align-items: baseline; gap: 8px; padding: 12px 14px;
+  border-bottom: 1px solid var(--hairline); font-weight: 600; font-size: 14px;
+}
+.np-head .sub { font-size: 12px; color: var(--text-sub); font-weight: 400; }
+.np-empty { padding: 22px 14px; text-align: center; color: var(--text-sub); font-size: 13px; }
+.np-list { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow-y: auto; }
+.np-list li { padding: 11px 14px; border-bottom: 1px solid var(--hairline-2); cursor: pointer; }
+.np-list li:last-child { border-bottom: none; }
+.np-list li:hover { background: var(--surface-2); }
+.np-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.np-body { font-size: 12px; color: var(--text-sub); margin-top: 3px; line-height: 1.5; }
 .avatar {
   width: 30px; height: 30px; border-radius: 50%; background: var(--accent);
   color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700;

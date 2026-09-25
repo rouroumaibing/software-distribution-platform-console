@@ -1,12 +1,12 @@
-// 资源索引：遍历服务树，把「Service / 组件 / 流水线」摊平成全局列表。
+// 资源索引：把「Service / 组件 / 流水线」摊平成全局列表。
 // 两个消费方共用这一次遍历结果：
-//   1) 运行中心（`RunCenterView.vue`）—— 用 `pipelines` 当两个视图的数据源；
+//   1) 运行中心（`RunCenterView.vue`）—— 用 `pipelines` 当发布视图的 kind 过滤数据源；
 //   2) 全局搜索 ⌘K 浮层（`useGlobalSearch.ts`）—— 用 `services` / `components` / `pipelines` 当命中池。
 //
-// 为什么是前端聚合：hub 目前只有 GET /components/:id/pipelines（按组件列），
-// 既没有 GET /pipelines?scope=global（设计文档 附 A N-3），也没有 §5.2/§5.3 写的
-// 「服务端 GET /search」—— 两者均已在 UNIMPLEMENTED-MODULES-PLAN 登记为后端缺口。
-// M1 数据量小（百级请求在本地库可接受）；等聚合端点落地后本文件可下线。
+// 流水线已直连真端点：P0-2（hub GET /pipelines 全局列表）落地后，流水线不再走
+// 「组织→服务→组件→流水线」四级遍历聚合，改为一次 `pipelineApi.listGlobal` 单次拉取
+// （A 节：下线前端聚合 stopgap）。组件 / 服务仍需遍历以喂搜索池并补全流水线所属
+// 组件名 / 组织名 / 服务名展示。
 import { orgApi } from '@/api/org'
 import { catalogApi } from '@/api/catalog'
 import { componentApi } from '@/api/component'
@@ -64,6 +64,9 @@ export async function buildResourceIndex(): Promise<ResourceIndex> {
   const components: ComponentRef[] = []
   const byPipelineId = new Map<string, PipelineRef>()
 
+  // componentId → 名称/路径，流水线列表只带 componentId，展示名从这里补。
+  const componentById = new Map<string, ComponentRef>()
+
   const orgs = await orgApi.list(PAGE)
   for (const o of orgs.items) {
     const tree = await orgApi.getServiceTree(o.id).catch(() => undefined)
@@ -75,31 +78,35 @@ export async function buildResourceIndex(): Promise<ResourceIndex> {
       const comps = await componentApi.listByService(s.id, PAGE).catch(() => undefined)
       if (!comps) continue
       for (const c of comps.items) {
-        components.push({
+        const ref: ComponentRef = {
           componentId: c.id,
           componentName: c.name,
           componentKey: c.key,
           orgName: o.name,
           serviceName: s.name,
-        })
-        const pls = await pipelineApi.listByComponent(c.id, PAGE).catch(() => undefined)
-        if (!pls) continue
-        for (const p of pls.items) {
-          const ref: PipelineRef = {
-            pipelineId: p.id,
-            pipelineName: p.name,
-            componentId: c.id,
-            componentName: c.name,
-            kind: p.kind,
-            version: p.version,
-            orgName: o.name,
-            serviceName: s.name,
-          }
-          pipelines.push(ref)
-          byPipelineId.set(p.id, ref)
         }
+        components.push(ref)
+        componentById.set(c.id, ref)
       }
     }
+  }
+
+  // A 节：流水线直连全局真端点，不再按组件嵌套遍历（下线前端聚合 stopgap）。
+  const pls = await pipelineApi.listGlobal(PAGE).catch(() => undefined)
+  for (const p of pls?.items ?? []) {
+    const c = componentById.get(p.componentId)
+    const ref: PipelineRef = {
+      pipelineId: p.id,
+      pipelineName: p.name,
+      componentId: p.componentId,
+      componentName: c?.componentName ?? '—',
+      kind: p.kind,
+      version: p.version,
+      orgName: c?.orgName ?? '—',
+      serviceName: c?.serviceName ?? '—',
+    }
+    pipelines.push(ref)
+    byPipelineId.set(p.id, ref)
   }
 
   return { pipelines, byPipelineId, services, components }
