@@ -9,12 +9,18 @@ data:
   # 运行时前端配置：由 chart values（auth / api 节）渲染，挂载为
   # /usr/share/nginx/html/config.js（镜像已纯静态，不再内置 envsubst 模板）。
   # 变量语义与 http.ts / stores/auth.ts 的 window.__APP_CONFIG__ 读取保持一致。
+  #
+  # ⚠️ G-11 修复（2026-09-26）：YAML `#` 注释绝不能出现在下方 `config.js: |`
+  # 块内部 —— 那会被原样渲染进 JS（`window.__APP_CONFIG__ = { #... }` 非法），
+  # 运行时配置整体解析失败 → SKIP_AUTH 模式前端卡死在 Keycloak 登录页。
+  # 需要给模板加注释，一律写在 data: 这一层（YAML 注释），JS 内只能用 //。
   config.js: |
     // 运行时配置：chart values -> ConfigMap 注入，改 values 后 helm upgrade 生效。
+    // （VITE_AUTH_DISABLED 的值经 toString 归一化：helm --set xxx=false 会把值
+    // 解析成 bool，bool false 落进 sprig default 会被当零值顶掉 —— 真踩过：
+    // --set false 渲染成 "true"。values 默认 "true"。）
     window.__APP_CONFIG__ = {
       VITE_API_BASE_URL: {{ .Values.api.baseUrl | default "" | quote }},
-      # ⚠️ toString 先归一化：helm --set xxx=false 会把值解析成 bool，bool false 落进
-      # sprig default 会被当零值顶掉（真踩过：--set false 渲染成 "true"）。values 默认 "true"。
       VITE_AUTH_DISABLED: {{ .Values.auth.authDisabled | toString | quote }},
       VITE_KEYCLOAK_ISSUER_URL: {{ .Values.auth.keycloakIssuerUrl | default "" | quote }},
       VITE_KEYCLOAK_CLIENT_ID: {{ .Values.auth.keycloakClientId | default "" | quote }},

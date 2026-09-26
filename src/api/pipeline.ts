@@ -34,15 +34,20 @@ export interface PipelineStage {
 }
 
 // Release 类型：声明式施加一个软件单元。chart 与 manifest 二选一。
+//
+// ⚠️ G-12 修复（2026-09-26）：本接口会被 hub 原样存进 pipeline_task_templates，
+// 触发时 `templateToTaskSpec` 直接 json.Unmarshal 进 runner 的 `ReleaseSpec`——
+// 字段名必须与 runnerapi 严格一致，否则触发时报反序列化错误（manifest 裸字符串）
+// 或静默丢字段（repo → repoURL）。此前 console 用 manifest: string +
+// chart.repo/chart.chartUrl，实测 console 建的发布任务在触发时必挂/丢配置。
 export interface ReleaseConfig {
   chart?: {
-    repo?: string // helm repo URL
+    repoURL?: string // helm repo URL（runner ChartSource.repoURL，原名 "repo" 会被静默丢弃）
     name?: string // chart 名称
-    version?: string // chart 版本
-    chartUrl?: string // 或直接使用 chart 包 URL
+    version?: string // chart 版本（可写 ${参数key}，触发时由 hub 替换）
   }
-  values?: Record<string, string> // 注入 values（可引用参数管理 key）
-  manifest?: string // kubectl apply 的 YAML 内容
+  values?: Record<string, string> // 注入 values（可写 ${参数key}）
+  manifest?: { content: string } // kubectl apply 的 YAML（runner ManifestSource，裸 string 无法反序列化）
 }
 
 // 重试策略（runnerapi.RetryPolicy）。maxRetries=0 表示不重试。
@@ -74,11 +79,13 @@ export interface PipelineTaskTemplate {
   // Build 类型：内联命令（优先于 scriptPath）。例如 command=["pytest"], args=["-q"]
   command?: string[]
   args?: string[]
-  // 脚本逃生通道（可选，Build 类型下可不放脚本）
+  // Build 类型配置
   scriptPath?: string
   scriptArgs?: string[]
   produces?: string[]
   consumes?: string[]
+  // G-4：特权模式（dind/cind 构建镜像需要），opt-in
+  privileged?: boolean
   // Release 类型配置
   releaseConfig?: ReleaseConfig
   // Approval 类型配置

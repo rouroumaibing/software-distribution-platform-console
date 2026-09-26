@@ -34,6 +34,7 @@ const form = reactive({
   image: '',
   commandLine: '', // 空格分隔，提交时拆成 command + args
   scriptPath: '',
+  privileged: false, // G-4：特权模式（dind/cind 构建镜像）
   timeoutSeconds: 600,
   maxRetries: 0,
   produces: '',
@@ -42,7 +43,6 @@ const form = reactive({
   chartRepo: '',
   chartName: '',
   chartVersion: '',
-  chartUrl: '',
   values: [] as { key: string; value: string }[],
   manifest: '',
   // 人工审核阶段（approvalConfig）
@@ -59,19 +59,19 @@ watch(
     form.image = t?.image ?? ''
     form.commandLine = [...(t?.command ?? []), ...(t?.args ?? [])].join(' ')
     form.scriptPath = t?.scriptPath ?? ''
+    form.privileged = t?.privileged ?? false
     form.timeoutSeconds = t?.timeoutSeconds ?? 600
     form.maxRetries = Number((t?.retryPolicy?.maxRetries as number) ?? 0)
     form.produces = (t?.produces ?? []).join(', ')
     form.consumes = (t?.consumes ?? []).join(', ')
-    form.chartRepo = t?.releaseConfig?.chart?.repo ?? ''
+    form.chartRepo = t?.releaseConfig?.chart?.repoURL ?? ''
     form.chartName = t?.releaseConfig?.chart?.name ?? ''
     form.chartVersion = t?.releaseConfig?.chart?.version ?? ''
-    form.chartUrl = t?.releaseConfig?.chart?.chartUrl ?? ''
     form.values = Object.entries(t?.releaseConfig?.values ?? {}).map(([key, value]) => ({
       key,
       value,
     }))
-    form.manifest = t?.releaseConfig?.manifest ?? ''
+    form.manifest = t?.releaseConfig?.manifest?.content ?? ''
     const approvers = (t?.approvalConfig?.allowedApprovers as string[] | undefined) ?? []
     form.approvers = approvers.join(', ')
     form.requiredApprovals = Number((t?.approvalConfig?.requiredApprovals as number) ?? 1) || 1
@@ -83,7 +83,7 @@ const title = computed(() => (props.task ? `编辑子任务 · ${props.task.name
 
 // ---- 派生 ----
 const hasReleaseConfig = computed(
-  () => !!(form.manifest.trim() || form.chartName.trim() || form.chartUrl.trim()),
+  () => !!(form.manifest.trim() || form.chartName.trim() || form.chartRepo.trim()),
 )
 const derivation = computed<TaskDerivationInput>(() => ({
   hasReleaseConfig: hasReleaseConfig.value,
@@ -123,13 +123,13 @@ async function save() {
     for (const kv of form.values) if (kv.key.trim()) values[kv.key.trim()] = kv.value
     const rc: ReleaseConfig = { values }
     if (form.manifest.trim()) {
-      rc.manifest = form.manifest
+      // G-12：runner ManifestSource 要求 {content} 包装，裸 string 无法反序列化。
+      rc.manifest = { content: form.manifest }
     } else {
       rc.chart = {
-        repo: form.chartRepo.trim() || undefined,
+        repoURL: form.chartRepo.trim() || undefined,
         name: form.chartName.trim() || undefined,
         version: form.chartVersion.trim() || undefined,
-        chartUrl: form.chartUrl.trim() || undefined,
       }
     }
     payload.releaseConfig = rc
@@ -153,6 +153,7 @@ async function save() {
     payload.command = parts.length > 0 ? [parts[0]] : []
     payload.args = parts.slice(1)
     payload.scriptPath = form.scriptPath.trim() || undefined
+    payload.privileged = form.privileged || undefined
     payload.produces = splitCsv(form.produces)
     payload.consumes = splitCsv(form.consumes)
     payload.retryPolicy = { maxRetries: Number(form.maxRetries) || 0 }
@@ -205,6 +206,7 @@ async function save() {
       <label>命令（空格分隔，首个词为 command，其余为 args）</label>
       <input v-model="form.commandLine" class="input mono" placeholder="如 go build ./... 或 pytest -q" />
       <div class="hint">预览：<span class="chip">{{ previewCmd }}</span></div>
+      <div class="hint">支持 ${参数key} 占位（触发时由 hub 用运行参数替换）；也可在命令里引用 $参数名（注入为容器环境变量）。</div>
       <div class="hint">runner 仅确认正常退出（退出码 0 = 成功），不解析输出内容。</div>
     </div>
     <div class="two">
@@ -227,6 +229,14 @@ async function save() {
         <input v-model="form.consumes" class="input" placeholder="逗号分隔" />
       </div>
     </div>
+    <div class="hint" style="margin-bottom: 12px">
+      produces/consumes 即产物交接：上游任务把文件上传到对应 key（POST /artifacts/upload-url），
+      下游任务自动从制品库拉取同名文件到工作目录。任务成功后 key 会自动登记进制品 Tab。
+    </div>
+    <label class="check-row">
+      <input v-model="form.privileged" type="checkbox" />
+      <span>特权模式（docker in docker / containerd in containerd 构建镜像需要）</span>
+    </label>
     <details class="hint" style="margin-bottom: 16px">
       <summary style="cursor: pointer">脚本逃生通道（可选）</summary>
       <div class="field" style="margin-top: 10px">
@@ -240,12 +250,11 @@ async function save() {
     <div class="field">
       <label>Chart 源</label>
       <div class="kv-row">
-        <input v-model="form.chartRepo" class="input" placeholder="repo（helm repo URL）" />
+        <input v-model="form.chartRepo" class="input" placeholder="repoURL（helm repo URL）" />
         <input v-model="form.chartName" class="input" placeholder="name" />
       </div>
       <div class="kv-row">
-        <input v-model="form.chartVersion" class="input" placeholder="version" />
-        <input v-model="form.chartUrl" class="input" placeholder="chartUrl（可选，优先级高）" />
+        <input v-model="form.chartVersion" class="input" placeholder="version，可写 ${参数key}" />
       </div>
     </div>
     <div class="field">
@@ -295,6 +304,11 @@ async function save() {
   font-size: 12px; line-height: 1.6; color: var(--warning-fg);
   background: var(--warning-bg); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px;
 }
+.check-row {
+  display: flex; align-items: center; gap: 8px; font-size: 13px;
+  margin: 4px 0 16px; cursor: pointer; color: var(--text-fg, inherit);
+}
+.check-row input { accent-color: var(--accent, #2456d9); }
 .sec {
   font-size: 12px; font-weight: 700; color: var(--text-sub);
   text-transform: none; letter-spacing: 0.02em;

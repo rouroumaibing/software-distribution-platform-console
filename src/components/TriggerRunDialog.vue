@@ -5,6 +5,7 @@ import Modal from './Modal.vue'
 import { runApi, type PipelineRun, type Param } from '@/api/run'
 import { targetApi, type Target } from '@/api/target'
 import { componentApi, type ComponentConfig } from '@/api/component'
+import { artifactApi } from '@/api/artifact'
 import { toast } from '@/utils/toast'
 import { readErrorAxios, readDeleteVerdict } from '@/utils/pipeline'
 
@@ -20,6 +21,11 @@ const targetId = ref('')
 const namespace = ref('')
 const params = ref<Param[]>([])
 const triggering = ref(false)
+// B-20 最小版：制品库版本 picker。G-2/G-14 修复后构建产物会登记进 artifacts，
+// 这里把该组件已登记的版本列出来供一键填入 VERSION 参数（不做制品→发布语义
+// 联动，那属完整版 B-20 的产品裁定范围）。
+const artifactVersions = ref<string[]>([])
+const pickedVersion = ref('')
 // 后端结构化拒绝（如 B-11 生产强审批的 409 + reasons）：**原样**渲染，前端不加工、
 // 不推断影响面。与流水线删除的 verdict 走同一套读取逻辑。
 const refusal = ref<{ message: string; reasons: string[] } | null>(null)
@@ -36,6 +42,8 @@ watch(
   async (open) => {
     if (!open) return
     params.value = []
+    artifactVersions.value = []
+    pickedVersion.value = ''
     if (!props.componentId) return
     try {
       const res = await componentApi.listConfigs(props.componentId)
@@ -44,8 +52,24 @@ watch(
     } catch {
       // 参数预置失败不阻塞触发
     }
+    // 同批拉已登记制品版本（B-20 最小版）；失败仅隐藏 picker，不阻塞触发。
+    try {
+      const arts = await artifactApi.listByComponent(props.componentId, { page: 1, pageSize: 50 })
+      artifactVersions.value = [...new Set(arts.items.map((a) => a.version).filter(Boolean))]
+    } catch {
+      // 版本列表失败不阻塞触发
+    }
   },
 )
+
+// 选中版本 → 填入（或新增）名为 VERSION 的参数行；其余参数不动。
+function applyVersion(v: string) {
+  pickedVersion.value = v
+  if (!v) return
+  const row = params.value.find((p) => p.name === 'VERSION')
+  if (row) row.value = v
+  else params.value.unshift({ name: 'VERSION', value: v })
+}
 
 function addParam() {
   params.value.push({ name: '', value: '' })
@@ -96,6 +120,13 @@ async function trigger() {
     </div>
     <div class="field">
       <label>运行参数（注入任务 command/args/env）</label>
+      <div v-if="artifactVersions.length" class="ver-row">
+        <span class="ver-label">从制品库选版本：</span>
+        <select class="select" :value="pickedVersion" @change="applyVersion(($event.target as HTMLSelectElement).value)">
+          <option value="">（手动输入）</option>
+          <option v-for="v in artifactVersions" :key="v" :value="v">{{ v }}</option>
+        </select>
+      </div>
       <div v-for="(p, i) in params" :key="i" class="kv-row">
         <input v-model="p.name" class="input" placeholder="name" />
         <input v-model="p.value" class="input" placeholder="value" />
@@ -127,4 +158,7 @@ async function trigger() {
   border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 4px;
 }
 .refusal .reasons { margin: 6px 0 0; padding-left: 20px; line-height: 1.8; }
+.ver-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ver-label { font-size: 13px; color: var(--text-secondary, #666); white-space: nowrap; }
+.ver-row .select { flex: 1; }
 </style>

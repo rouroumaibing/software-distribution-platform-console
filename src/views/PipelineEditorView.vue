@@ -110,8 +110,8 @@ function taskSummary(t: PipelineTaskTemplate): string {
   }
   if (t.type === 'Release') {
     const c = t.releaseConfig?.chart
-    if (t.releaseConfig?.manifest) return 'kubectl apply'
-    return c?.chartUrl || [c?.repo, c?.name, c?.version].filter(Boolean).join(' / ') || 'helm upgrade'
+    if (t.releaseConfig?.manifest?.content) return 'kubectl apply'
+    return [c?.repoURL, c?.name, c?.version].filter(Boolean).join(' / ') || 'helm upgrade'
   }
   return 'approval'
 }

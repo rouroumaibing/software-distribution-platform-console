@@ -75,8 +75,16 @@ export interface TriggerRequest {
 
 export const runApi = {
   // 触发运行:传接入目标/参数/代码源,DAG 由后端组装。
+  // hub 契约:POST /pipelines/:id/runs 返回 {data: PipelineRun[]}(targetIds 扇出
+  // 时一条请求可产多个 run,故恒为列表,e2e-smoke gotcha 实测)。取首元素;
+  // 对象形状兜底,防御后端契约收紧。
   trigger: (pipelineId: string, payload: TriggerRequest) =>
-    http.post<{ data: PipelineRun }>(`/pipelines/${pipelineId}/runs`, payload).then((r) => r.data.data),
+    http
+      .post<{ data: PipelineRun[] | PipelineRun }>(`/pipelines/${pipelineId}/runs`, payload)
+      .then((r) => {
+        const d = r.data.data
+        return Array.isArray(d) ? d[0] : d
+      }),
 
   get: (id: string) => http.get<{ data: PipelineRun }>(`/runs/${id}`).then((r) => r.data.data),
 
