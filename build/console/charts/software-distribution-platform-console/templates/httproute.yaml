@@ -2,7 +2,7 @@
 # console 对外路由（Envoy Gateway / Gateway API）：替代已废弃的 ingress-nginx Ingress。
 #
 # 与原 Ingress 等价：host www.sdpworkflow.com、Prefix /、后端 console svc 443（TLS）。
-# Gateway（GatewayClass/EnvoyProxy/Gateway）归运行方/本地脚手架（根目录 deploy/gateway-sdp.yaml，
+# Gateway（GatewayClass/EnvoyProxy/Gateway）归运行方/本地脚手架（local-kind-dev/deploy/gateway-sdp.yaml，
 # 不随仓分发），本 chart 按名字引用（gatewayRoute.gatewayName，可 --set 覆盖）——保持独立可装：
 # 没有网关时本路由只是 Pending，不影响 console 自身运行。
 # parentRefs 不指定 sectionName => 同时挂 http/https listener。

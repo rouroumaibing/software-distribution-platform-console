@@ -25,31 +25,31 @@ resources:
 
 # TLS 证书 secret（443 ssl 用）：chart 只**引用** secret 名，容器内挂到 /etc/nginx/ssl。
 # 生产：由运维**手工创建**该 secret（证书来自你自己的 PKI），部署流程不生成任何私钥——同 old/go-devops。
-# 本地：缺失时由仓内脚本 scripts/gen-certs.sh 自签兜底（产物 console/output/certs，随 pnpm clean 回收）；
-#       默认域名已设为 www.sdpworkflow.com，gen-certs.sh 的 SAN 已含该域名。
+# 本地：缺失时由统一证书生成器 software-distribution-platform-env/cert-build/cert-create.sh 自签兜底
+#       （源在 env 仓 cert-build/，部署时由 deploy-local.sh 直接运行源脚本，产物 env/cert-build/certs）；
+#       默认域名已设为 www.sdpworkflow.com，生成器的 SAN 已含该域名。
+#       生成器定位：商用 CA 证书申请前的替代证书（dev/staging 占位），详见 docs/shared/CERTIFICATES.md。
 # 必需 key：ca.crt / server.crt / server.key（items 见 templates/deployment.yaml）。
 cert:
   secretName: console-tls
 
 # 对外路由（Envoy Gateway / Gateway API，替代已废弃的 ingress-nginx）：
-# Gateway 网关级资源在 hub chart（frontGateway.*）创建，本 chart 只带自己的
+# Gateway 网关级资源在 local-kind-dev/deploy/gateway-sdp.yaml 创建，本 chart 只带自己的
 # HTTPRoute + BackendTLSPolicy（templates/httproute.yaml）。gatewayName 必须与
-# hub chart frontGateway.name 一致（跨 chart 名字引用，改名须两 chart 同步）。
+# gateway-sdp.yaml 里的 Gateway 名（sdp-gateway）一致（跨资源名字引用，改名须同步）。
 # host 默认 www.sdpworkflow.com（生产可 helm --set gatewayRoute.hostname=... 覆盖）；
-# TLS 终结在 Gateway https listener（证书 secret 由 hub chart frontGateway.tlsSecretName 引用）。
+# TLS 终结在 Gateway https listener（证书 secret console-ingress-tls 由 local-kind-dev/deploy/gateway-sdp.yaml 的 certificateRefs 引用）。
 gatewayRoute:
   enabled: true
   gatewayName: "sdp-gateway"
   hostname: "www.sdpworkflow.com"
-  # BackendTLSPolicy 校验 console 后端证书用的 CA secret（gen-certs.sh 创建，内含 ca.crt）。
+  # BackendTLSPolicy 校验 console 后端证书用的 CA secret（统一生成器创建，内含 ca.crt）。
   caSecretName: "console-tls"
 
-# hub 反代目标（nginx ConfigMap 中 upstream，集群内 svc 名须为 hub，命名空间 sdp-workflow）
+# 前端 API baseURL（运行时注入 config.js）。留空时前端兜底 '/api/v1'
+# （浏览器 -> Gateway /api -> hub，不经 console nginx 反代；console 只服务 SPA）。
+# 一般无需修改。
 api:
-  hubService: hub
-  hubPort: "8080"
-  # 前端 API baseURL（运行时注入 config.js）。留空时前端兜底 '/api/v1'
-  # （浏览器 -> Gateway /api -> console nginx -> hub），一般无需修改。
   baseUrl: ""
 
 # 前端认证配置（chart values -> ConfigMap -> config.js，改这里 helm upgrade 即可，无需重建镜像）。

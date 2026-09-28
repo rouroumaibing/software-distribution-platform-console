@@ -8,7 +8,8 @@ metadata:
 data:
   # 完整主配置（对齐参考工程 old/go-devops/console：ConfigMap 整份挂载
   # /etc/nginx/nginx.conf，镜像保持纯静态、不含任何站点配置）。
-  # 差异点（SDP 适配）：新增 /api 反代到集群内 hub svc；
+  # SDP 适配：443 ssl 仅服务前端 SPA；/api 由网关（Envoy Gateway）按 PathPrefix
+  #   /api 直连 hub svc，不经本 nginx 反代（console 不再充当 hub 反向代理）。
   #   443 ssl 证书来自 chart 预置的 server-secret（/etc/nginx/ssl）。
   nginx.conf: |
     user  nginx;
@@ -40,11 +41,6 @@ data:
         gzip_types text/plain application/javascript text/css application/xml text/javascript application/x-httpd-php image/jpeg image/gif image/png;
         gzip_vary on;
 
-        # hub 反代目标（集群内 svc，chart values gateway 同命名空间）
-        upstream hub_backend {
-            server {{ .Values.api.hubService }}:{{ .Values.api.hubPort }};
-        }
-
         server {
             listen       443 ssl;
             server_name  _;
@@ -60,18 +56,6 @@ data:
                 add_header X-XSS-Protection '1; mode=block';
             }
 
-            # SDP：/api 反代到 hub（含 ws 升级头，供 gateway/日志流）
-            location /api/ {
-                proxy_pass http://hub_backend;
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto $scheme;
-                proxy_http_version 1.1;
-                proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection "upgrade";
-                proxy_read_timeout 300s;
-            }
         }
 
         server {

@@ -42,12 +42,16 @@
 
 ## TLS 证书（交付契约 / 本地自签）
 
+> 单一真源：证书生成器的定位、secret 名 / key / 消费方契约统一记录在
+> [`docs/shared/CERTIFICATES.md`](https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/shared/CERTIFICATES.md)。
+> 本证书是**商用 CA 证书申请之前的替代证书**（dev/staging 占位）。
+
 console 的 HTTPS 由**两个集群内 Secret** 承载，**镜像与交付包不携带任何证书或私钥**：
 
 | Secret | 类型 | 必需 key | 消费方（容器内引用） |
 | --- | --- | --- | --- |
-| `console-tls` | `Opaque` | `ca.crt` `server.crt` `server.key` | chart 挂到 pod 内 `/etc/nginx/ssl`（`defaultMode 384`），nginx 443 监听使用。见 `build/console/charts/.../templates/deployment.yaml` |
-| `console-ingress-tls` | `kubernetes.io/tls` | `tls.crt` `tls.key` | ingress 终结外部 HTTPS。见 `templates/ingress.yaml` |
+| `console-tls` | `Opaque` | `ca.crt` `server.crt` `server.key` | console chart 挂到 pod 内 `/etc/nginx/ssl`（`defaultMode 384`），nginx 443 监听使用；同一 `ca.crt` 另被 console `BackendTLSPolicy`（`gatewayRoute.caSecretName`）与 hub `auth.trustedCASecret` 复用。见 `build/console/charts/.../templates/deployment.yaml` |
+| `console-ingress-tls` | `kubernetes.io/tls` | `tls.crt` `tls.key` | Gateway https listener 终结外部 HTTPS（certificateRefs 引用）。见 local-kind-dev/deploy/gateway-sdp.yaml |
 
 - **生产环境：由运维手工创建这两个 Secret**（证书来自你自己的 PKI / CA），组件只在容器内引用 —— 与参考工程 `old/go-devops` 的做法一致（`chart` 只声明 `secretName`，部署流程不生成私钥）。示例：
 
@@ -57,9 +61,9 @@ console 的 HTTPS 由**两个集群内 Secret** 承载，**镜像与交付包不
   kubectl -n sdp-workflow create secret tls console-ingress-tls --cert server.crt --key server.key
   ```
 
-  Secret 名可改，改 `values.yaml` 的 `cert.secretName` / `ingress.tlsSecretName` 即可（两者是 chart 的引用入口）。
-- **本地联调**：没有 PKI 时用仓内脚本 `scripts/gen-certs.sh` 自签兜底（临时测试用途，产物落 `output/certs`，随 `pnpm clean` 一起回收；私钥 `chmod 600`）。脚本默认会：生成 CA + server 证书 → `kubectl apply` 覆写上面两个 Secret（幂等；CA 文件已存在则复用，保证证书链一致）；运行前需已 `export KUBECONFIG`。
-  - 只想拿到证书文件（集群没起 / 没有 kubectl）时加 `--local-only`：`bash scripts/gen-certs.sh --local-only` —— 只产出 `output/certs/{ca.crt,server.crt,server.key}`，不碰集群；集群可用后再跑一次**不带**该参数的脚本即可写入 Secret，或用上面的 `kubectl create secret` 手工创建。
+  Secret 名可改：`console-tls` 改 console chart 的 `cert.secretName` 与 `gatewayRoute.caSecretName`（两者是 console chart 的引用入口）；`console-ingress-tls` 改 local-kind-dev/deploy/gateway-sdp.yaml 的 Gateway https listener `certificateRefs`（该引用不在 chart values 内）。
+   - **本地联调**：没有 PKI 时用统一证书生成器 `software-distribution-platform-env/cert-build/cert-create.sh` 自签兜底（临时测试用途；源在 env 仓 cert-build/，部署时由 `deploy-local.sh` 直接运行源脚本，产物落 `env/cert-build/certs`，不进版本库；私钥 `chmod 600`）。脚本默认会：生成 CA + server 证书 → `kubectl apply` 覆写上面两个 Secret（幂等；CA 文件已存在则复用，保证证书链一致）；运行前需已 `export KUBECONFIG`。
+   - 只想拿到证书文件（集群没起 / 没有 kubectl 二进制）：直接运行 `bash software-distribution-platform-env/cert-build/cert-create.sh`（无 kubectl 时只由 `self-signed-ca-cert.sh` 产出 `certs/{ca.crt,console.crt,console.key,...}`，不碰集群）；集群可用后再跑一次（有 kubectl）即可写入 Secret，或用上面的 `kubectl create secret` 手工创建。
   - 命名空间默认 `sdp-workflow`（可作首个位置参数覆盖）；产物目录可用 `CERTS_DIR` 覆盖。
   - ⚠️ 本脚本生成的 CA 是**本地自签的**：换机 / 重生成会让指纹变化，已经信任过旧 `ca.crt` 的浏览器需要重新信任。
 
