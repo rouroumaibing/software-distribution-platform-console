@@ -28,8 +28,8 @@ export interface PipelineStage {
   name: string
   sequence: number
   // 阶段内子任务并行 / 串行（hub pipeline_stages.execution_mode，migrations/0010）。
-  // ⚠️ 只做 API ↔ DB 往返：runner 侧**尚未**按 serial 串行调度（backlog C-06），
-  // 故 UI 文案不得声称「串行执行已生效」。
+  // runner 侧 serial 调度已生效（pipelinerun_controller.go 的 serialBlocked，C-06）：
+  // serial 阶段内子任务严格按序执行，UI 文案可如实描述「串行执行已生效」。
   executionMode: StageExecutionMode
 }
 
@@ -190,9 +190,8 @@ export interface VersionRollbackResult {
 
 export const pipelineApi = {
   ...crud,
-  // 全局流水线列表：P0-2 已落地（hub GET /pipelines）。替代原先前端「组织→服务→组件→流水线」
-  // 四级遍历聚合（useResourceMap.buildResourceIndex 的 stopgap）。M1 规模下默认拉一页足够，
-  // 真超量再翻页遍历。
+  // 全局流水线列表：直连 hub GET /pipelines（P0-2），不经前端「组织→服务→组件→流水线」
+  // 四级遍历聚合。M1 规模下默认拉一页足够，真超量再翻页遍历。
   listGlobal: (p?: Pagination) => listPaged<Pipeline>('/pipelines', p),
   listByComponent: (componentId: string, p?: Pagination) =>
     listPaged<Pipeline>(`/components/${componentId}/pipelines`, p),

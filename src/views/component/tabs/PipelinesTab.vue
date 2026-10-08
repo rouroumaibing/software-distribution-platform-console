@@ -70,7 +70,7 @@ function runAt(p: Pipeline): string {
 // 编辑 / 运行
 // ---------------------------------------------------------------------------
 
-// §7.4 / N-7：**不再**用 kind 限制可编排范围（早前仅允许 build，属过时客户端闸门）。
+// §7.4 / N-7：不用 kind 限制可编排范围（仅允许 build 的客户端闸门是过时约束，勿恢复）。
 // hub 的 kind 是自由字符串（build/release/custom，无服务端校验），编排能力与 kind 无关。
 function openEditor(p: Pipeline) {
   router.push(`/pipelines/${p.id}`)

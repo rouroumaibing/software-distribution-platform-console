@@ -21,7 +21,7 @@ const targetId = ref('')
 const namespace = ref('')
 const params = ref<Param[]>([])
 const triggering = ref(false)
-// B-20 最小版：制品库版本 picker。G-2/G-14 修复后构建产物会登记进 artifacts，
+// B-20 最小版：制品库版本 picker。构建产物登记进 artifacts（G-2/G-14），
 // 这里把该组件已登记的版本列出来供一键填入 VERSION 参数（不做制品→发布语义
 // 联动，那属完整版 B-20 的产品裁定范围）。
 const artifactVersions = ref<string[]>([])

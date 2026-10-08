@@ -3,9 +3,9 @@
 //   1) 运行中心（`RunCenterView.vue`）—— 用 `pipelines` 当发布视图的 kind 过滤数据源；
 //   2) 全局搜索 ⌘K 浮层（`useGlobalSearch.ts`）—— 用 `services` / `components` / `pipelines` 当命中池。
 //
-// 流水线已直连真端点：P0-2（hub GET /pipelines 全局列表）落地后，流水线不再走
-// 「组织→服务→组件→流水线」四级遍历聚合，改为一次 `pipelineApi.listGlobal` 单次拉取
-// （A 节：下线前端聚合 stopgap）。组件 / 服务仍需遍历以喂搜索池并补全流水线所属
+// 流水线直连真端点（P0-2：hub GET /pipelines 全局列表）——不走
+// 「组织→服务→组件→流水线」四级遍历聚合，由一次 `pipelineApi.listGlobal` 单次拉取
+// （A 节：不做前端聚合）。组件 / 服务仍需遍历以喂搜索池并补全流水线所属
 // 组件名 / 组织名 / 服务名展示。
 import { orgApi } from '@/api/org'
 import { catalogApi } from '@/api/catalog'
@@ -91,7 +91,7 @@ export async function buildResourceIndex(): Promise<ResourceIndex> {
     }
   }
 
-  // A 节：流水线直连全局真端点，不再按组件嵌套遍历（下线前端聚合 stopgap）。
+  // A 节：流水线直连全局真端点（`pipelineApi.listGlobal`），不做按组件嵌套遍历的前端聚合。
   const pls = await pipelineApi.listGlobal(PAGE).catch(() => undefined)
   for (const p of pls?.items ?? []) {
     const c = componentById.get(p.componentId)

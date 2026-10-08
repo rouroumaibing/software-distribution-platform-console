@@ -3,7 +3,7 @@
 //
 // 与 scripts/runcenter-url-smoke.mjs 同一手法：直接 import 源码 .ts（Node ≥22.18
 // 原生类型剥离）—— 测的是出厂代码本身，不是复制品；涉及 DOM 的部分（浮层渲染、
-// localStorage 读写）不在这里测，改为**静态断言**源码里的关键不变量，防止回归。
+// localStorage 读写）不在这里测，用**静态断言**覆盖源码里的关键不变量，防止回归。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
@@ -118,8 +118,8 @@ check('令牌表：暗色块存在、左栏走 --rail-bg、海军蓝已清除', 
   assert.ok(css.includes('--rail-bg:'), '缺少 --rail-bg 令牌（§9.2）')
   assert.ok(css.includes('--rail-active-bg:'), '缺少 --rail-active-bg 令牌')
   assert.ok(css.includes('--bg:') && css.includes('--surface:') && css.includes('--accent:'), '缺少 §9.2 权威令牌')
-  // §9.2 / P4：light 左栏不再用海军蓝。只查**声明式用法** —— 源码注释里
-  // 保留「原先是 #001529」这句改动说明是有价值的，不该被断言误伤。
+  // §9.2 / P4：light 左栏底色走 --rail-bg，不用海军蓝。只查**声明式用法** ——
+  // 源码注释里的背景说明不参与本断言，不会被误伤。
   assert.ok(!/background(-color)?\s*:\s*#001529/i.test(css), 'tokens.css 仍把海军蓝 #001529 当底色（P4 未清）')
   assert.ok(!css.includes('--menu-bg'), '仍残留 --menu-bg 别名，应按 §9.2 统一为 --rail-bg')
   // 灰阶自检（§9.6）

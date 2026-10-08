@@ -1,5 +1,5 @@
 {{- if .Values.gatewayRoute.enabled }}
-# console 对外路由（Envoy Gateway / Gateway API）：替代已废弃的 ingress-nginx Ingress。
+# console 对外路由（Envoy Gateway / Gateway API）：外部入口走 Gateway API，不经 ingress-nginx Ingress。
 #
 # 与原 Ingress 等价：host www.sdpworkflow.com、Prefix /、后端 console svc 443（TLS）。
 # Gateway（GatewayClass/EnvoyProxy/Gateway）归运行方/本地脚手架（local-kind-dev/deploy/gateway-sdp.yaml，

@@ -4,9 +4,9 @@
 // 与 pipeline / service-tree / theme-and-search 同一手法：直接 import 源码 .ts
 // （Node ≥22.18 原生类型剥离），测出厂代码本身，防止契约回退。
 //
-// D3 之后 hub 不存用户表、控制台没有用户目录（ACCOUNT-PERMISSION-MODEL §2.2 /
-// ACCOUNT-PERMISSION-DECISIONS §3.5），所以本文件的断言从「主体显示名会补全成
-// 张三（z@sdp.io）」改成「只显示真值、并挡住必然绑定不上的输入」。
+// hub 不存用户表、控制台没有用户目录（ACCOUNT-PERMISSION-MODEL §2.2 /
+// ACCOUNT-PERMISSION-DECISIONS §3.5），所以本文件的断言约束为：主体显示
+// 只显示真值、并挡住必然绑定不上的输入（不做「补全成张三（z@sdp.io）」式假名）。
 import assert from 'node:assert/strict'
 import {
   failMsg,

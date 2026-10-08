@@ -77,7 +77,7 @@ onMounted(load)
 async function load() {
   loading.value = true
   try {
-    // ① 直取单条（不再从组件列表里 find）
+    // ① 直取单条（不走组件列表 find）
     const p = await pipelineApi.get(pipelineId)
     pipeline.value = p
     meta.value = { name: p.name, kind: p.kind, description: p.description ?? '' }

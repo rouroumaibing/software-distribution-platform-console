@@ -3,7 +3,7 @@
 //
 // 与 scripts/theme-and-search-smoke.mjs 同一手法：
 //   - 纯逻辑**直接 import 源码 .ts**（Node ≥22.18 原生类型剥离）—— 测出厂代码本身；
-//   - 涉及 DOM / 网络的部分（滚动、请求）不在这里测，改为**静态断言**源码里的
+//   - 涉及 DOM / 网络的部分（滚动、请求）不在这里测，用**静态断言**覆盖源码里的
 //     关键不变量，防止"改回一次性拉全树"这类回归。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'

@@ -2,8 +2,8 @@
 // 跑法：pnpm test:pipeline（或 node scripts/pipeline-editor-smoke.mjs）。
 //
 // 与 runcenter / theme-and-search 两个冒烟同一手法：直接 import 源码 .ts
-// （Node ≥22.18 原生类型剥离），测出厂代码本身；涉及 DOM 的部分改为**静态断言**
-// 源码里的关键不变量，防止契约回退。
+// （Node ≥22.18 原生类型剥离），测出厂代码本身；涉及 DOM 的部分用**静态断言**
+// 覆盖源码里的关键不变量，防止契约回退。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {

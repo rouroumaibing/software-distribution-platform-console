@@ -3,11 +3,11 @@
 // 布局决策见设计文档 §7.1 全局骨架 / §5.1 左栏结构 / §9.2 令牌：
 // https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI-DESIGN.md
 //
-// 本轮（C-02 暗色主题）对左栏的两处纠正，对齐 §7.1 / §9.2：
-//   ① 底色由硬编码海军蓝 `#001529` 改为 `--rail-bg`（light=surface / dark=#141720）——
+// 左栏对齐 §7.1 / §9.2 的两处约束：
+//   ① 底色走 `--rail-bg`（light=surface / dark=#141720），不用硬编码海军蓝 `#001529` ——
 //      §9.2 的 P4「消除海军蓝割裂」：内容与导航共用同一套令牌，light 全浅、dark 全深；
-//      原实现是固定深蓝，等于暗色主题下唯一"不跟着变"的一块，且与 light 相冲突。
-//   ② 去掉选中项的 3px 竖条（§7.1 / §9.5 明令"不用 3px 竖条"），改为
+//      固定深蓝在暗色主题下是唯一"不跟着变"的一块，且与 light 相冲突。
+//   ② 选中项不用 3px 竖条（§7.1 / §9.5 明令"不用 3px 竖条"），用
 //      「圆角块 + --rail-active-bg 底 + --rail-active-fg 字」。
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

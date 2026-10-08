@@ -40,7 +40,7 @@ export function subjectLabel(b: { subjectType?: string; subjectId?: string }): s
   return b.subjectType === 'group' ? `组：${id}` : id
 }
 
-// (b′) 的控制台半边：授权表单不再有「用户目录」可拉，改为「下拉已绑定主体 +
+// (b′) 的控制台半边：授权表单没有「用户目录」可拉，候选项来自「下拉已绑定主体 +
 // 手输」。这个函数把已有绑定里的主体去重成候选项 —— 只列 hub 能解释的东西
 // （它自己绑定表里的主体），不引入 Keycloak Admin API
 // （§2.4.4 零外呼 / ACCOUNT-PERMISSION-DECISIONS §3.2）。

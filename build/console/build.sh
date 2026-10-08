@@ -103,17 +103,6 @@ function build_console_docker_image(){
     popd > /dev/null
 }
 
-# 可选: 有本地 registry（kind 环境 localhost:5000）时打 tag 推送，失败不阻断
-function push_to_local_registry(){
-    if docker tag "${component}:${version}" "localhost:5000/${component}:${version}" 2>/dev/null; then
-        if docker push "localhost:5000/${component}:${version}" 2>/dev/null; then
-            echo "${component} pushed to localhost:5000."
-        else
-            echo "WARN: push to localhost:5000 failed (no local registry?), skip."
-        fi
-    fi
-}
-
 function charts_pack(){
     pushd "${OUTPUTDIR}/charts" > /dev/null
     tar -zcvf "${component}-${version}.tgz" "${component}"
@@ -142,6 +131,5 @@ prepare_build_file
 render_chart_version
 build_console
 build_console_docker_image
-push_to_local_registry
 charts_pack
 pack

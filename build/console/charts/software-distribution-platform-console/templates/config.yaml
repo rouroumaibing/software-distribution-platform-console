@@ -7,7 +7,7 @@ metadata:
     app: {{ .Values.basic.component }}
 data:
   # 运行时前端配置：由 chart values（auth / api 节）渲染，挂载为
-  # /usr/share/nginx/html/config.js（镜像已纯静态，不再内置 envsubst 模板）。
+  # /usr/share/nginx/html/config.js（镜像为纯静态，不含 envsubst 模板）。
   # 变量语义与 http.ts / stores/auth.ts 的 window.__APP_CONFIG__ 读取保持一致。
   #
   # ⚠️ G-11 修复（2026-09-26）：YAML `#` 注释绝不能出现在下方 `config.js: |`

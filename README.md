@@ -5,7 +5,7 @@
 
 管理命令入口为 `package.json` scripts（pnpm）；服务启停、清理的底层实现见 `scripts/`，`pnpm run` 可查看全部脚本。**本仓自包含：所有命令只依赖仓内脚本（`scripts/*.sh`、`build/console/build.sh`），不依赖仓库外的任何脚本** —— 起服务用 `pnpm start:dev`，产出镜像 / 交付包用 `pnpm image`。
 
-**构建产物统一落在 `output/` 下**（vite 产物 `output/dist`、依赖预构建缓存 `output/.vite`、本地自签证书 `output/certs`、`pnpm image` 的交付产物），清理即一条 `rm -rf output`；仓库根不再产生 `dist/`。
+**构建产物统一落在 `output/` 下**（vite 产物 `output/dist`、依赖预构建缓存 `output/.vite`、本地自签证书 `output/certs`、`pnpm image` 的交付产物），清理即一条 `rm -rf output`；仓库根不产生 `dist/`（历史位置由 `pnpm clean` 兜底清理）。
 
 | 命令 | 作用 |
 | --- | --- |
@@ -69,7 +69,7 @@ console 的 HTTPS 由**两个集群内 Secret** 承载，**镜像与交付包不
 
 ## 设计文档
 
-本组件的设计文档（UI 设计、IA 原型、实现 Story、验收标准等）已统一收敛到独立的 [`software-distribution-platform-docs`](https://github.com/rouroumaibing/software-distribution-platform-docs) 仓库（单一真源），本仓库不再存放设计文档正文。
+本组件的设计文档（UI 设计、IA 原型、实现 Story、验收标准等）统一存放在独立的 [`software-distribution-platform-docs`](https://github.com/rouroumaibing/software-distribution-platform-docs) 仓库（单一真源），本仓库只保留指针、不存放设计文档正文。
 
 - 前端设计文档（唯一事实源，IA v3）：[`console/CONSOLE-UI-DESIGN.md`](https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI-DESIGN.md)
 - IA v3 可交互原型：[`console/CONSOLE-UI-原型.html`](https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI-原型.html)

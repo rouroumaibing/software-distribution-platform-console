@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 // （总览/服务树/运行中心 + 平台管理 2 项）；
 // 组件详情 = /components/:id 全屏子路由 Tab（概览/配置/流水线/运行/发布/制品/环境/权限/日志）；
 // 运行中心的 运行/发布 是同一页的两个视图，用 ?view= 承载而不是子路由（附 B N-13；
-// 「流水线」视图已于 v4.4 移除，其列表归属「组件详情 · 交付 · 流水线」）。
+// IA v4.4 无「流水线」顶层视图，其列表归属「组件详情 · 交付 · 流水线」）。
 // 旧 flat 菜单路由（/pipelines /releases /artifacts /environments /permissions /logs）→ redirect。
 const router = createRouter({
   history: createWebHistory(),
@@ -69,7 +69,7 @@ const router = createRouter({
         { path: 'admin/clusters', redirect: '/admin/targets' },
 
         // ---- 旧 flat 菜单路由 → redirect（deep link 兼容）----
-        // 「发布」v4 起不再是顶层页，降为运行中心的视图 —— 所以旧链要直接落到该视图，
+        // 「发布」是运行中心的视图（IA v4 无顶层「发布」页）—— 旧链要直接落到该视图，
         // 而不是笼统地回 /runs（否则点「发布」旧链看到运行列表，属静默语义漂移；
         // 附 B 硬约束 ⑤）。
         // 「流水线」则连视图都不是（v4.4 起），它的列表归「组件详情 · 交付 · 流水线」，

@@ -13,7 +13,7 @@ service:
   externPort: 443
 
 image:
-  imageAddr: localhost:5000/software-distribution-platform-console:v0.0.1
+  imageAddr: harbor.sdpworkflow.com/sdp/software-distribution-platform-console:v0.0.1
   pullPolicy: Always
   imagePullSecrets: default-secret
 
@@ -33,7 +33,7 @@ resources:
 cert:
   secretName: console-tls
 
-# 对外路由（Envoy Gateway / Gateway API，替代已废弃的 ingress-nginx）：
+# 对外路由（Envoy Gateway / Gateway API；外部入口不经 ingress-nginx）：
 # Gateway 网关级资源在 local-kind-dev/deploy/gateway-sdp.yaml 创建，本 chart 只带自己的
 # HTTPRoute + BackendTLSPolicy（templates/httproute.yaml）。gatewayName 必须与
 # gateway-sdp.yaml 里的 Gateway 名（sdp-gateway）一致（跨资源名字引用，改名须同步）。

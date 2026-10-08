@@ -14,7 +14,7 @@
 //      见 utils/tree.ts，避免 CSS 与 JS 各写一个高度导致错位）。
 //   4) **独立滚动容器** —— 树面板自身滚动，页面不随树变长（§4.1）。
 //
-// 创建主干（沿用原有"树+节点添加对话框"模式）：无组织 → 创建组织（自动 1:1 服务树）；
+// 创建主干（「树 + 节点添加对话框」模式）：无组织 → 创建组织（自动 1:1 服务树）；
 // 选中组织 → 添加服务；选中服务 → 添加组件。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

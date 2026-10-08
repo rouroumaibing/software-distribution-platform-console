@@ -2,8 +2,8 @@
 // 平台管理（IA v2）：用户与平台权限（平台级 RBAC，C-10 端点）/ 接入管理 / 凭据管理。
 // 组件级授权在各组件详情的「权限」Tab —— 权限双轨的平台侧半边。
 //
-// D3 之后 hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2），所以本页**没有用户目录**，
-// 也不再调 `GET /users`（该端点已随 users 表删除）。主体暴露方式按决策文档 §3.5 第 4 条
+// hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2），所以本页**没有用户目录**，
+// 也不调 `GET /users`（hub 无该端点）。主体暴露方式按决策文档 §3.5 第 4 条
 // 的 (b′)：下拉候选 = 绑定表里去重出的「已绑定主体」，新主体靠**手输** `sub` / 组路径。
 import { computed, onMounted, reactive, ref } from 'vue'
 import Modal from '@/components/Modal.vue'

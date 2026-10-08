@@ -4,11 +4,11 @@ import type { Envelope } from './http'
 
 // 注意：这里**没有 User 类型，也没有 /users 端点**。
 // hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2 / D3），所以控制台拿不到
-// 「系统里有哪些人」这份目录。授权表单改为「下拉已绑定主体 + 手输 sub」，
+// 「系统里有哪些人」这份目录。授权表单是「下拉已绑定主体 + 手输 sub」，
 // 见 utils/permission.ts 的 knownSubjects / validateSubjectInput。
 
 // V1 legacy roles table (Viewer/Editor/Admin) — 只读保留。
-// D3 之后 `component_role_bindings.role_id` 已删，所以这些角色**不再可被绑定**；
+// `component_role_bindings` 无 role_id 列（D3），这些角色**不可被绑定**；
 // 保留列表只为历史行展示与 /roles 端点兼容。新的授权一律走下面的 ComponentRole。
 export interface Role {
   id: string
@@ -34,7 +34,7 @@ export interface ComponentRole {
 //   - subjectId   : Keycloak `sub`（user）| 组路径（group，带前导斜杠，§5.3）
 //   - componentRoleId : the granted component_roles role
 //
-// D3 删掉了 V1 的 userId / roleId 两列，所以这里不再有「旧数据回退字段」——
+// 绑定行没有 V1 的 userId / roleId 回退字段（D3 起）——
 // 每一行都必然是 §7 主体绑定。
 export interface ComponentRoleBinding {
   id: string
@@ -74,7 +74,7 @@ export interface PlatformRoleBinding {
 
 export const permissionApi = {
   // V1 角色是种子数据(Viewer/Editor/Admin),只读,没有增删改接口。
-  // ⚠️ 不可用于新建绑定（role_id 列已随 D3 删除）。
+  // ⚠️ 不可用于新建绑定（`component_role_bindings` 无 role_id 列，D3）。
   roles: {
     list: () => http.get<{ data: Role[] }>('/roles').then((r) => r.data.data),
   },

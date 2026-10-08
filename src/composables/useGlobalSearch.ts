@@ -169,7 +169,7 @@ export function openPalette() {
   state.debounced = ''
   state.active = -1
   // 索引照旧在后台建：空查询的"头部视图"要靠它，服务端搜索失败时也要靠它。
-  // 但它不再是唯一来源，所以与打字并发也不影响正确性。
+  // 但它并非唯一来源（打字走服务端搜索），二者并发不影响正确性。
   void ensureIndex()
 }
 

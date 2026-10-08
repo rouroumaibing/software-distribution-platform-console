@@ -9,7 +9,7 @@ data:
   # 完整主配置（对齐参考工程 old/go-devops/console：ConfigMap 整份挂载
   # /etc/nginx/nginx.conf，镜像保持纯静态、不含任何站点配置）。
   # SDP 适配：443 ssl 仅服务前端 SPA；/api 由网关（Envoy Gateway）按 PathPrefix
-  #   /api 直连 hub svc，不经本 nginx 反代（console 不再充当 hub 反向代理）。
+  #   /api 直连 hub svc，不经本 nginx 反代（console 只服务 SPA，不做 hub 反向代理）。
   #   443 ssl 证书来自 chart 预置的 server-secret（/etc/nginx/ssl）。
   nginx.conf: |
     user  nginx;
