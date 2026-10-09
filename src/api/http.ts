@@ -18,6 +18,33 @@ http.interceptors.request.use((config) => {
   return config
 })
 
+// 403 统一出口（STATUS #21 / §7.9「权限不足错误态」）：非 200 响应里只有
+// 403 语义全局一致 —— 「该账号没有这条资源的权限」，与具体表单无关，所以
+// 拦截器直接跳 Forbidden 页；400/404/409 仍由调用方 catch 就地呈现。
+// 两个豁免口，防止把「故意探测权限」的调用也踢走：
+//   ① 单请求豁免：config 传 skip403Redirect: true（如权限探测、批量探测）；
+//   ② 已在 /forbidden 时不重复跳（防循环）。
+// 401 不在这里处理：会话过期由 auth store 的 token 刷新/登出流程负责。
+declare module 'axios' {
+  export interface InternalAxiosRequestConfig {
+    skip403Redirect?: boolean
+  }
+}
+http.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    if (
+      axios.isAxiosError(error) &&
+      error.response?.status === 403 &&
+      !error.config?.skip403Redirect &&
+      window.location.pathname !== '/forbidden'
+    ) {
+      window.location.assign('/forbidden')
+    }
+    return Promise.reject(error)
+  },
+)
+
 // 后端统一响应格式:{ data?, error? } 或分页的 { data: { items, total, page, pageSize } }
 export interface Envelope<T> {
   data?: T

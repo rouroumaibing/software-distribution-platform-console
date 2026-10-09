@@ -91,10 +91,11 @@ export const runApi = {
   listByPipeline: (pipelineId: string, p?: Pagination) =>
     listPaged<PipelineRun>(`/pipelines/${pipelineId}/runs`, p),
 
-  // 全局运行列表（运行中心）：跨 pipeline 巡视，phase / componentId 均为可选过滤。
+  // 全局运行列表（运行中心）：跨 pipeline 巡视，phase / componentId / createdAfter /
+  // triggeredBy 均为可选过滤（createdAfter = ISO 时间戳，只返回该时刻之后的运行，hub 端点已支持）。
   // componentId 是流水线列表「最近运行」列要的：**一次**取回该组件下全部运行，
   // 客户端按 pipelineId 分组取最新 —— 否则每条流水线各打一次 → N+1。
-  listAll: (p?: Pagination & { phase?: string; componentId?: string }) =>
+  listAll: (p?: Pagination & { phase?: string; componentId?: string; createdAfter?: string; triggeredBy?: string }) =>
     listPaged<PipelineRun>('/runs', p),
 
   listTasks: (runId: string) =>

@@ -37,6 +37,7 @@ async function load() {
 
 function openCreate() {
   editId.value = null
+  rotateMode.value = false
   form.name = ''
   form.type = 'kubeconfig'
   form.scope = undefined
@@ -49,6 +50,7 @@ function openCreate() {
 
 function openEdit(c: CredentialDTO) {
   editId.value = c.id
+  rotateMode.value = false
   form.name = c.name
   form.type = c.type
   form.scope = c.scope
@@ -59,9 +61,23 @@ function openEdit(c: CredentialDTO) {
   modal.value = true
 }
 
+// 显式轮转：与编辑同一表单，但语义收紧 —— 凭据值**必填**（留空没有意义，
+// 轮转的目的就是换值），标题与按钮文案随之变化，避免「以为保存了元数据其实什么都没换」。
+const rotateMode = ref(false)
+
+function openRotate(c: CredentialDTO) {
+  openEdit(c)
+  rotateMode.value = true
+}
+
 async function save() {
   if (!form.name.trim()) {
     toast.err('请填写名称')
+    return
+  }
+  // 轮转模式必须提供新值：留空 = 保留旧密文，等于没轮转。
+  if (rotateMode.value && !form.value.trim()) {
+    toast.err('轮转需填写新凭据值')
     return
   }
   saving.value = true
@@ -151,6 +167,7 @@ onMounted(load)
             <td>{{ c.valueSet ? '✓' : '—' }}</td>
             <td class="mono">{{ new Date(c.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</td>
             <td class="row-actions">
+              <a @click="openRotate(c)">轮转</a>
               <a @click="openEdit(c)">编辑</a>
               <a style="color: var(--failed-fg)" @click="remove(c)">删除</a>
             </td>
@@ -159,7 +176,7 @@ onMounted(load)
       </table>
     </div>
 
-    <Modal :open="modal" :title="editId ? '编辑凭据' : '新建凭据'" @close="modal = false">
+    <Modal :open="modal" :title="rotateMode ? '轮转凭据' : editId ? '编辑凭据' : '新建凭据'" @close="modal = false">
       <div class="field">
         <label>名称</label>
         <input v-model="form.name" class="input" type="text" placeholder="如 prod-kubeconfig" />
@@ -181,7 +198,7 @@ onMounted(load)
         </div>
       </div>
       <div class="field">
-        <label>凭据值{{ editId ? '（留空 = 保留现有值）' : '' }}</label>
+        <label>凭据值{{ rotateMode ? '（必填：轮转即换值）' : editId ? '（留空 = 保留现有值）' : '' }}</label>
         <textarea v-model="form.value" class="input" rows="5" :placeholder="form.type === 'kubeconfig' ? '粘贴 kubeconfig 全文' : '凭据明文（仅内存/请求中存在，落库即加密）'"></textarea>
         <p class="hint">明文只随本次请求上送，hub 落库前 AES-GCM 加密；列表与详情均不回显明文。</p>
         <button v-if="form.type === 'kubeconfig'" class="btn btn-pearl btn-sm" type="button" @click="previewKubeconfig">预览解析</button>
@@ -195,7 +212,9 @@ onMounted(load)
       <p v-if="parseErr" class="parse-err">{{ parseErr }}</p>
       <template #foot>
         <button class="btn btn-pearl" @click="modal = false">取消</button>
-        <button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
+        <button class="btn btn-primary" :disabled="saving" @click="save">
+          {{ saving ? '保存中…' : rotateMode ? '轮转' : '保存' }}
+        </button>
       </template>
     </Modal>
   </div>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 // 发布/灰度详情(CONSOLE-LAYOUT §3.6)：步骤器 + 任务进度 + 控制按钮(G4 端点已接)。
+// 灰度回流（RUNNER-REFLUX-SPEC §3）：percent 优先用 hub 落库的真实权重快照
+// （runner 上报 CurrentWeight → rollout_runs），任务完成数只作无快照时的降级近似。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { runApi, type PipelineRun, type TaskRun } from '@/api/run'
+import { releaseApi, type RolloutRun } from '@/api/release'
 import { toast } from '@/utils/toast'
 
 const route = useRoute()
@@ -11,6 +14,7 @@ const runId = route.params.id as string
 
 const run = ref<PipelineRun>()
 const tasks = ref<TaskRun[]>([])
+const snapshots = ref<RolloutRun[]>([])
 const loading = ref(true)
 const controlling = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -20,6 +24,11 @@ async function pollOnce() {
   const p = await runApi.progress(runId)
   run.value.phase = p.phase
   tasks.value = p.tasks
+  try {
+    snapshots.value = await releaseApi.listByRun(runId)
+  } catch {
+    /* 快照读取失败不影响进度展示 */
+  }
 }
 
 onMounted(async () => {
@@ -37,13 +46,24 @@ onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
 
-// Release 任务即发布单元;Rollout 步骤(10/50/100)用任务进度近似,精确权重
-// 需 runner 把 Rollout.Status.CurrentWeight 同步进 TaskRun(后续增强)。
+// Release 任务即发布单元。
 const releaseTasks = computed(() => tasks.value.filter((t) => t.type === 'Release'))
+
+// 真实权重：该 run 的灰度快照里「进行中/最新」一行的 currentWeight；快照缺
+// 席（旧 runner / 尚未上报）时退回任务完成数近似（原有行为）。
+const snapshotWeight = computed(() => {
+  if (snapshots.value.length === 0) return undefined
+  const active = snapshots.value.find(
+    (s) => !['Healthy', 'Degraded', 'RollingBack'].includes(s.phase),
+  )
+  return (active ?? snapshots.value[0]).currentWeight
+})
+
 const doneCount = computed(() => tasks.value.filter((t) => t.phase === 'Succeeded').length)
-const percent = computed(() =>
+const approxPercent = computed(() =>
   tasks.value.length === 0 ? 0 : Math.round((doneCount.value / tasks.value.length) * 100),
 )
+const percent = computed(() => snapshotWeight.value ?? approxPercent.value)
 
 // 控制目标:第一个尚未终态的 Release 任务(pause/promote/rollback 都打给它)。
 const controlTarget = computed(

@@ -9,7 +9,7 @@
 //      固定深蓝在暗色主题下是唯一"不跟着变"的一块，且与 light 相冲突。
 //   ② 选中项不用 3px 竖条（§7.1 / §9.5 明令"不用 3px 竖条"），用
 //      「圆角块 + --rail-active-bg 底 + --rail-active-fg 字」。
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { toggleGray, toggleTheme, useTheme } from '@/composables/useTheme'
@@ -24,21 +24,73 @@ const { theme } = useTheme()
 const collapsed = ref(false)
 
 // ---- 通知中心（§2 #7）：铃铛消费待审批运行流 ----
+// 30s 轮询：通知是待审批/失败运行的聚合视图，审批与运行状态随时变化，
+// 一次拉取会立刻过期。
+//
+// 已读语义（STATUS #20，RUNNER-REFLUX-SPEC §6 两级实现）：
+//   ① 服务端权威（2026-10-08 起）：hub read-mark + unreadCount（服务端时钟，
+//      消除 skew）。打开面板 → markRead 推进 hub 游标；unread 直接取响应的
+//      unreadCount。
+//   ② localStorage 降级：旧 hub（无 read-mark）或服务端调用失败时，回退
+//      客户端游标（按 token sub 隔离、60s skew 容忍）——原行为保留。
 const notifications = ref<Notification[]>([])
 const notifOpen = ref(false)
-const unread = computed(() => notifications.value.length)
+const serverUnread = ref<number | undefined>(undefined)
+const NOTIF_SKEW_MS = 60_000
 
+const notifCursorKey = computed(() => `sdp.notif.lastReadAt.${auth.user?.profile?.sub ?? 'anon'}`)
+const lastReadAt = ref<number>(0)
+
+function loadNotifCursor() {
+  const v = Number(localStorage.getItem(notifCursorKey.value) ?? '0')
+  lastReadAt.value = Number.isFinite(v) ? v : 0
+}
+
+function markNotifsRead() {
+  lastReadAt.value = Date.now()
+  localStorage.setItem(notifCursorKey.value, String(lastReadAt.value))
+  // 服务端游标推进（best-effort；失败/旧 hub 静默，降级路径已在上面写盘）
+  void notificationApi.markRead()
+}
+
+const unread = computed(() => {
+  if (serverUnread.value !== undefined) return serverUnread.value
+  return notifications.value.filter(
+    (n) => new Date(n.createdAt).getTime() > lastReadAt.value + NOTIF_SKEW_MS,
+  ).length
+})
+
+let notifTimer: ReturnType<typeof setInterval> | undefined
 async function loadNotifications() {
-  notifications.value = await notificationApi.list().catch(() => [])
+  try {
+    const resp = await notificationApi.list()
+    notifications.value = resp.data
+    // 服务端给出 unreadCount 即视为权威；旧 hub 无该字段 → undefined → 降级
+    serverUnread.value = resp.unreadCount
+  } catch {
+    notifications.value = []
+    serverUnread.value = undefined
+  }
+}
+function startNotifPolling() {
+  loadNotifCursor()
+  void loadNotifications()
+  notifTimer = setInterval(loadNotifications, 30_000)
+}
+function stopNotifPolling() {
+  if (notifTimer !== undefined) clearInterval(notifTimer)
 }
 function toggleNotif() {
   notifOpen.value = !notifOpen.value
+  if (notifOpen.value) markNotifsRead()
 }
 function openNotif(n: Notification) {
   notifOpen.value = false
+  markNotifsRead()
   router.push(n.link)
 }
-onMounted(loadNotifications)
+onMounted(startNotifPolling)
+onBeforeUnmount(stopNotifPolling)
 
 // 图标是**本地常量**的 SVG 片段（不含任何用户输入），故可安全用 v-html 注入；
 // 路径照抄原型 CONSOLE-UI-原型.html 的 ICON 表，线宽/圆角由 CSS 统一控制。
@@ -98,6 +150,21 @@ const activePath = computed(() => {
 const userName = computed(() => {
   const p = auth.user?.profile
   return (p?.name as string) || (p?.preferred_username as string) || '用户'
+})
+
+// ---- 个人中心（§7.1 顶栏账户区）：轻量下拉，展示当前会话的身份信息 ----
+// hub 不存用户表，这里能展示的只有 Keycloak token profile 里的字段。
+const profileOpen = ref(false)
+const profile = computed(() => {
+  const p = (auth.user?.profile ?? {}) as Record<string, unknown>
+  const roles = p.realm_access as { roles?: string[] } | undefined
+  return {
+    name: (p.name as string) || (p.preferred_username as string) || '—',
+    username: (p.preferred_username as string) || '—',
+    email: (p.email as string) || '—',
+    sub: (p.sub as string) || '—',
+    roles: roles?.roles ?? [],
+  }
 })
 
 async function logout() {
@@ -187,9 +254,30 @@ async function logout() {
             </div>
           </div>
           <div class="user-chip">
-            <span class="avatar">{{ userName.slice(0, 2).toUpperCase() }}</span>
-            <span class="uname">{{ userName }}</span>
+            <button
+              class="chip-btn"
+              :class="{ open: profileOpen }"
+              title="个人中心"
+              @click="profileOpen = !profileOpen"
+            >
+              <span class="avatar">{{ userName.slice(0, 2).toUpperCase() }}</span>
+              <span class="uname">{{ userName }}</span>
+            </button>
             <button class="logout" title="退出登录" @click="logout">⏻</button>
+            <div v-if="profileOpen" class="profile-pop">
+              <div class="pf-row"><span>姓名</span><b>{{ profile.name }}</b></div>
+              <div class="pf-row"><span>用户名</span><span class="mono">{{ profile.username }}</span></div>
+              <div class="pf-row"><span>邮箱</span><span class="mono">{{ profile.email }}</span></div>
+              <div class="pf-row"><span>sub</span><span class="mono pf-sub" :title="profile.sub">{{ profile.sub }}</span></div>
+              <div class="pf-roles">
+                <span class="pf-roles-label">Realm 角色</span>
+                <template v-if="profile.roles.length">
+                  <span v-for="r in profile.roles" :key="r" class="chip">{{ r }}</span>
+                </template>
+                <span v-else class="muted">—</span>
+              </div>
+              <p class="pf-hint">身份由 Keycloak 提供；平台/组件权限在各管理页按绑定展示（hub 不存用户表）。</p>
+            </div>
           </div>
         </div>
       </header>
@@ -276,7 +364,32 @@ async function logout() {
 .si { display: inline-flex; }
 .si :deep(svg) { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; }
 
-.user-chip { display: flex; align-items: center; gap: 8px; margin-left: 6px; }
+.user-chip { display: flex; align-items: center; gap: 8px; margin-left: 6px; position: relative; }
+.chip-btn {
+  display: flex; align-items: center; gap: 8px; background: none; border: none;
+  cursor: pointer; padding: 3px 6px; border-radius: 9px; font-family: var(--font);
+}
+.chip-btn:hover, .chip-btn.open { background: var(--surface-2); }
+
+/* 个人中心下拉（与通知面板同形态） */
+.profile-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; width: 300px; z-index: 50;
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14); padding: 12px 14px;
+}
+.pf-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 13px; padding: 4px 0;
+}
+.pf-row > span:first-child { color: var(--text-sub); flex: 0 0 auto; }
+.pf-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; display: inline-block; }
+.pf-roles {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  border-top: 1px solid var(--hairline-2); margin-top: 8px; padding-top: 8px; font-size: 12px;
+}
+.pf-roles-label { color: var(--text-sub); width: 100%; }
+.pf-hint { margin: 8px 0 0; font-size: 11.5px; color: var(--text-sub); line-height: 1.5; }
+.muted { color: var(--text-sub); }
 
 /* ---------- 通知中心（§2 #7） ---------- */
 .notif { position: relative; }

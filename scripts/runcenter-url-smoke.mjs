@@ -10,6 +10,8 @@ import {
   sameQuery,
   runViewLabel,
   RUN_VIEWS,
+  RUN_TIME_RANGES,
+  timeToCreatedAfter,
   getRunView,
   isRunViewKey,
   isValidRunFilter,
@@ -30,7 +32,7 @@ function check(name, fn) {
 // ---- ① 缺省归一化：地址栏只有一种形态 ----
 check('裸 /runs → ?view=runs', () => {
   const q = canonicalRunQuery({})
-  assert.deepEqual(q, { view: 'runs', phase: '', page: 1 })
+  assert.deepEqual(q, { view: 'runs', phase: '', time: '', componentId: '', triggeredBy: '', page: 1 })
   assert.deepEqual(runQueryParams(q), { view: 'runs' })
 })
 
@@ -42,14 +44,22 @@ check('?view=bogus → 回落 runs', () => {
 
 check('?view=pipelines（已删视图）→ 回落 runs，且不残留 kind 筛选', () => {
   const q = canonicalRunQuery({ view: 'pipelines', phase: 'build' })
-  assert.deepEqual(q, { view: 'runs', phase: '', page: 1 })
+  assert.deepEqual(q, { view: 'runs', phase: '', time: '', componentId: '', triggeredBy: '', page: 1 })
   assert.deepEqual(runQueryParams(q), { view: 'runs' })
 })
 
 check('深链完整形态原样保留', () => {
-  const q = canonicalRunQuery({ view: 'releases', phase: 'Running', page: '2' })
-  assert.deepEqual(q, { view: 'releases', phase: 'Running', page: 2 })
-  assert.deepEqual(runQueryParams(q), { view: 'releases', phase: 'Running', page: '2' })
+  const q = canonicalRunQuery({ view: 'releases', phase: 'Running', time: '24h', page: '2' })
+  assert.deepEqual(q, { view: 'releases', phase: 'Running', time: '24h', componentId: '', triggeredBy: '', page: 2 })
+  assert.deepEqual(runQueryParams(q), { view: 'releases', phase: 'Running', time: '24h', page: '2' })
+})
+
+check('componentId / triggeredBy 深链保留、缺省不写进地址栏', () => {
+  const q = canonicalRunQuery({ view: 'runs', componentId: 'abc-uuid', triggeredBy: 'alice' })
+  assert.equal(q.componentId, 'abc-uuid')
+  assert.equal(q.triggeredBy, 'alice')
+  assert.deepEqual(runQueryParams(q), { view: 'runs', componentId: 'abc-uuid', triggeredBy: 'alice' })
+  assert.deepEqual(runQueryParams(canonicalRunQuery({ view: 'runs' })), { view: 'runs' })
 })
 
 check('视图/筛选混搭被丢弃（?view=releases&phase=Failed 之外的 kind 值）', () => {
@@ -93,6 +103,46 @@ check('归一化幂等（replace 不会自我循环）', () => {
 check('?phase=paused 不被接受（Paused 是 Rollout 任务级状态，不是 run phase）', () => {
   const q = canonicalRunQuery({ view: 'releases', phase: 'paused' })
   assert.equal(q.phase, '')
+})
+
+// ---- ⑥ 时间范围（§7.13 ⑤）：?time= 下推 hub createdAfter ----
+check('time 合法 key 保留，非法 key 丢弃', () => {
+  assert.equal(canonicalRunQuery({ time: '1h' }).time, '1h')
+  assert.equal(canonicalRunQuery({ time: '24h' }).time, '24h')
+  assert.equal(canonicalRunQuery({ time: '7d' }).time, '7d')
+  assert.equal(canonicalRunQuery({ time: 'bogus' }).time, '', '未知 time 必须丢掉，不能透传给 hub')
+  assert.equal(canonicalRunQuery({ time: '30m' }).time, '', '不在 RUN_TIME_RANGES 里的粒度不收')
+})
+
+check('默认形态不把 time 写进地址栏', () => {
+  const q = canonicalRunQuery({ view: 'runs', time: '' })
+  assert.deepEqual(runQueryParams(q), { view: 'runs' })
+  assert.deepEqual(runQueryParams(canonicalRunQuery({ view: 'runs', time: '1h' })), { view: 'runs', time: '1h' })
+})
+
+check('timeToCreatedAfter：key → ISO 时间戳，偏差在秒级', () => {
+  const now = new Date('2026-10-08T12:00:00Z')
+  assert.equal(timeToCreatedAfter('1h', now), '2026-10-08T11:00:00.000Z')
+  assert.equal(timeToCreatedAfter('24h', now), '2026-10-07T12:00:00.000Z')
+  assert.equal(timeToCreatedAfter('7d', now), '2026-10-01T12:00:00.000Z')
+  assert.equal(timeToCreatedAfter('', now), undefined, '全部时间 = 不过滤')
+  assert.equal(timeToCreatedAfter('bogus', now), undefined)
+})
+
+check('RUN_TIME_RANGES：首个是「全部」，key 唯一', () => {
+  assert.equal(RUN_TIME_RANGES[0].value, '')
+  assert.equal(RUN_TIME_RANGES[0].label, '全部时间')
+  const vals = RUN_TIME_RANGES.map((t) => t.value)
+  assert.equal(new Set(vals).size, vals.length, 'time key 重复')
+  assert.deepEqual(vals, ['', '1h', '24h', '7d'])
+})
+
+check('time 参与归一化幂等', () => {
+  const input = { view: 'runs', phase: 'Failed', time: '7d', page: '2' }
+  const once = canonicalRunQuery(input)
+  const twice = canonicalRunQuery(runQueryParams(once))
+  assert.deepEqual(twice, once)
+  assert.ok(sameQuery(runQueryParams(once), runQueryParams(twice)))
 })
 
 // ---- ② 面包屑同源 ----

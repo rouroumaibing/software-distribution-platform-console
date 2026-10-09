@@ -4,9 +4,17 @@
 // 右侧 = 选中操作的实时输出与状态（SSE 订阅 /agent-ops/:id/stream，离线重连重放全量日志）。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { agentOpApi, agentOpStatusLabel, agentOpTypeLabel, streamAgentOp, type AgentOp, type AgentOpLog, type AgentOpStatus } from '@/api/agentOp'
+import { packageVersionApi, type PackageVersions } from '@/api/packageversion'
 import { toast } from '@/utils/toast'
 
 const props = defineProps<{ targetId: string }>()
+
+// 平台包版本矩阵（§9.10）：install/upgrade 排队的目标版本就是从这里读的
+//（hub 侧 SetAgentOps 注入），展示出来让「装的是哪个版本」可见。
+const pkgVersions = ref<PackageVersions | null>(null)
+onMounted(async () => {
+  pkgVersions.value = await packageVersionApi.get().catch(() => null)
+})
 
 const ops = ref<AgentOp[]>([])
 const total = ref(0)
@@ -152,6 +160,7 @@ onBeforeUnmount(stopStream)
       <h1 class="title">接入目标操作台账</h1>
       <div class="sub">
         <span class="mono">{{ targetId.slice(0, 8) }}</span> · 直连执行 / Runner 安装升级的历史与实时输出（hub 侧已落地，console 消费端）
+        <span v-if="pkgVersions" class="mono"> · 版本矩阵：hub {{ pkgVersions.hub }} / runner {{ pkgVersions.runner }}</span>
       </div>
     </div>
 

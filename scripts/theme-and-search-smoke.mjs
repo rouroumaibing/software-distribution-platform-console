@@ -182,8 +182,16 @@ check('上限与防抖是 §5.3 定下的常量', () => {
   assert.equal(SEARCH_DEBOUNCE_MS, 200)
 })
 
-check('类型标签固定（组件/流水线/Service）', () => {
-  assert.deepEqual(SEARCH_KIND_LABEL, { component: '组件', pipeline: '流水线', service: 'Service' })
+check('类型标签固定（组件/流水线/Service/页面）', () => {
+  assert.deepEqual(SEARCH_KIND_LABEL, { component: '组件', pipeline: '流水线', service: 'Service', nav: '页面' })
+})
+
+check('nav 直达：id 即路由 path，scoreHit 按名称命中', () => {
+  const nav = { kind: 'nav', id: '/runs', name: '运行中心', path: '页面' }
+  assert.deepEqual(searchHitRoute(nav), { path: '/runs' })
+  assert.ok(scoreHit(nav, '运行') >= 0, '按页面名可命中')
+  assert.ok(scoreHit(nav, '页面') >= 0, '按类型标签「页面」可命中')
+  assert.equal(scoreHit(nav, '凭据'), -1, '不相关词不命中')
 })
 
 check('快捷键：⌘K 与 Ctrl+K 都行，单独 k 不行', () => {

@@ -5,7 +5,9 @@
 //   2) 索引构建（要打 API）与浮层渲染（要 DOM）都是副作用，属于组合层/组件层的事。
 // 设计依据：CONSOLE-UI-DESIGN.md §5.3 全局搜索（R-7）/ §7.5 全局搜索浮层。
 
-export type SearchKind = 'component' | 'pipeline' | 'service'
+// 'nav' = 平台级页面直达（console P2：⌘K 非组件直达）。nav 命中的 id 就是路由 path，
+// 只存在于客户端静态池（NAV_HITS，见 useGlobalSearch），服务端 /search 永远不会返回它。
+export type SearchKind = 'component' | 'pipeline' | 'service' | 'nav'
 
 /** 结果行 = 类型标签 + 名称 + 所属路径（§5.3）。`keyword` 只参与匹配、不展示。 */
 export interface SearchHit {
@@ -34,6 +36,7 @@ export const SEARCH_KIND_LABEL: Record<SearchKind, string> = {
   component: '组件',
   pipeline: '流水线',
   service: 'Service',
+  nav: '页面',
 }
 
 /** 稳定身份：同名不同 id 的两条结果必须能区分（列表 key 与去重都靠它）。 */
@@ -50,7 +53,7 @@ export interface SearchHitDto {
   keyword?: string
 }
 
-const SEARCH_KINDS: readonly SearchKind[] = ['component', 'pipeline', 'service']
+const SEARCH_KINDS: readonly SearchKind[] = ['component', 'pipeline', 'service', 'nav']
 
 export function isSearchKind(v: string): v is SearchKind {
   return (SEARCH_KINDS as readonly string[]).includes(v)
@@ -82,6 +85,9 @@ export function searchHitRoute(hit: SearchHit): SearchRoute {
       return { path: `/components/${hit.id}` }
     case 'pipeline':
       return { path: `/pipelines/${hit.id}` }
+    case 'nav':
+      // nav 的 id 就是目标路由 path（客户端静态池构造时即保证），直接跳。
+      return { path: hit.id }
     case 'service': {
       // `org` 是**定位提示**，不是权威数据：服务树在 R-8 之后是懒加载的，只给 id
       // 的话页面得逐个组织把服务列表拉一遍才找得到该服务（N 次请求）。服务命中的

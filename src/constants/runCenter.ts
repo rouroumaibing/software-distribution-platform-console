@@ -94,7 +94,30 @@ export interface RunCenterQuery {
   view: RunViewKey
   /** '' = 全部 */
   phase: string
+  /** 时间范围 key（'' = 全部）。取值见 RUN_TIME_RANGES，下推 hub GET /runs?createdAfter=。 */
+  time: string
+  /** 组件筛选（'' = 全部）。下推 hub GET /runs?componentId=。 */
+  componentId: string
+  /** 触发人筛选（'' = 全部）。下推 hub GET /runs?triggeredBy=（2026-10-08 hub 端点已支持）。 */
+  triggeredBy: string
   page: number
+}
+
+/** 时间范围选项（原型 §7.13 ⑤：近 1h / 24h / 7d）。value='' 表示不过滤。 */
+export const RUN_TIME_RANGES: { value: string; label: string }[] = [
+  { value: '', label: '全部时间' },
+  { value: '1h', label: '近 1 小时' },
+  { value: '24h', label: '近 24 小时' },
+  { value: '7d', label: '近 7 天' },
+]
+
+const TIME_KEYS = RUN_TIME_RANGES.map((t) => t.value)
+
+/** 时间范围 key → hub createdAfter ISO 时间戳；'' 或未知 key 返回 undefined（不过滤）。 */
+export function timeToCreatedAfter(time: string, now: Date = new Date()): string | undefined {
+  const seconds = { '1h': 3600, '24h': 86400, '7d': 604800 }[time]
+  if (!seconds) return undefined
+  return new Date(now.getTime() - seconds * 1000).toISOString()
 }
 
 const DEFAULT_PAGE = 1
@@ -104,15 +127,21 @@ export function canonicalRunQuery(query: Record<string, unknown>): RunCenterQuer
   const view: RunViewKey = isRunViewKey(query.view) ? query.view : DEFAULT_RUN_VIEW
   const rawPhase = typeof query.phase === 'string' ? query.phase : ''
   const phase = isValidRunFilter(view, rawPhase) ? rawPhase : ''
+  const time = typeof query.time === 'string' && TIME_KEYS.includes(query.time) ? query.time : ''
+  const componentId = typeof query.componentId === 'string' ? query.componentId : ''
+  const triggeredBy = typeof query.triggeredBy === 'string' ? query.triggeredBy : ''
   const rawPage = typeof query.page === 'string' ? Number(query.page) : NaN
   const page = Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : DEFAULT_PAGE
-  return { view, phase, page }
+  return { view, phase, time, componentId, triggeredBy, page }
 }
 
 /** 规范形态 → query 参数：默认值（view 之外的 '' / 第 1 页）不写进地址栏。 */
 export function runQueryParams(q: RunCenterQuery): Record<string, string> {
   const out: Record<string, string> = { view: q.view }
   if (q.phase) out.phase = q.phase
+  if (q.time) out.time = q.time
+  if (q.componentId) out.componentId = q.componentId
+  if (q.triggeredBy) out.triggeredBy = q.triggeredBy
   if (q.page > DEFAULT_PAGE) out.page = String(q.page)
   return out
 }

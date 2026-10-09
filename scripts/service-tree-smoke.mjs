@@ -254,8 +254,12 @@ check('api 层只做请求与翻译，翻译函数在 utils（可被 node 直接
   assert.ok(!api.includes('include(') || !api.includes('SEARCH_KINDS'), '类型白名单只应有一处定义')
 })
 
-check('搜索类型标签与后端模型取值一致（service/component/pipeline）', () => {
-  assert.deepEqual(Object.keys(SEARCH_KIND_LABEL).sort(), ['component', 'pipeline', 'service'])
+check('搜索类型标签与后端模型取值一致（service/component/pipeline；nav 仅客户端）', () => {
+  const keys = Object.keys(SEARCH_KIND_LABEL).sort()
+  assert.deepEqual(keys, ['component', 'nav', 'pipeline', 'service'])
+  // 服务端 GET /search 只会返回这三种（hub search/models.Hit 的 type 枚举）；
+  // nav 是客户端静态页面的直达池专属，永远不会出现在服务端命中里。
+  assert.deepEqual(keys.filter((k) => k !== 'nav'), ['component', 'pipeline', 'service'])
 })
 
 console.log(cases.join('\n'))

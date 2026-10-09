@@ -10,6 +10,8 @@ import Modal from '@/components/Modal.vue'
 import CredentialsView from '@/views/CredentialsView.vue'
 import { permissionApi, type ComponentRole, type PlatformRole, type PlatformRoleBinding } from '@/api/permission'
 import { targetApi, type Target } from '@/api/target'
+import { credentialApi, type KubeParseResult } from '@/api/credential'
+import { auditApi, type AuditLog, type AuditLogFilter } from '@/api/audit'
 import { toast } from '@/utils/toast'
 import {
   COMPONENT_ROLE_ACTION_GROUPS,
@@ -23,13 +25,36 @@ import {
   type SubjectType,
 } from '@/utils/permission'
 
-const props = defineProps<{ section: 'permissions' | 'targets' | 'credentials' }>()
+const props = defineProps<{ section: 'permissions' | 'targets' | 'credentials' | 'audit' }>()
 
 const roles = ref<PlatformRole[]>([]) // §7.2 平台角色（C-10，可管理）
 const bindings = ref<PlatformRoleBinding[]>([]) // 平台级绑定（C-10，可管理）
 const componentRoles = ref<ComponentRole[]>([]) // §7.3 组件角色（B-11，可管理）
 const targets = ref<Target[]>([])
 const loading = ref(true)
+
+// ---- 审计日志（STATUS #19 消费端）：读取端点 = hub GET /audit-logs ----
+const auditRows = ref<AuditLog[]>([])
+const auditLoading = ref(false)
+const auditFilter = reactive<AuditLogFilter>({ actionPrefix: '', subject: '', limit: 200 })
+
+async function loadAuditLogs() {
+  auditLoading.value = true
+  try {
+    auditRows.value = await auditApi.list({
+      actionPrefix: auditFilter.actionPrefix || undefined,
+      subject: auditFilter.subject || undefined,
+      limit: auditFilter.limit,
+    })
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+function fmtAuditTime(s: string) {
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? s : d.toLocaleString('zh-CN', { hour12: false })
+}
 
 const roleById = (id?: string) => roles.value.find((r) => r.id === id)
 
@@ -50,6 +75,8 @@ onMounted(async () => {
     } else if (props.section === 'targets') {
       const c = await targetApi.list({ page: 1, pageSize: 100 })
       targets.value = c.items
+    } else if (props.section === 'audit') {
+      await loadAuditLogs()
     }
     // section === 'credentials' → <CredentialsView/> 自行加载，这里无需取数
   } finally {
@@ -259,6 +286,87 @@ async function removeBinding(id: string) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 注册接入目标（§9.5/§9.7）：k8s 集群（kubeconfig 结构预览）/ 主机两类。
+// hub 契约：POST /targets（通用 CRUD，body = name/vendor/region/targetKind）；
+// kubeconfig 的权威校验在 hub 侧凭据体系，console 只做 POST /credentials/parse-kubeconfig
+// 结构预览，让用户在提交前看到 server/认证方式。
+// 成功后展示一次性 enroll-token（POST /targets/:id/enroll-token，24h）——
+// 这是 Runner Agent 完成首次回连注册的凭证，关掉弹窗就再也看不到。
+// ---------------------------------------------------------------------------
+const targetModal = ref(false)
+const targetSaving = ref(false)
+const targetForm = reactive<{ name: string; vendor: string; region: string; targetKind: 'k8s' | 'host'; kubeconfig: string }>({
+  name: '',
+  vendor: '',
+  region: '',
+  targetKind: 'k8s',
+  kubeconfig: '',
+})
+const kubeParse = ref<KubeParseResult | null>(null)
+const kubeParseErr = ref('')
+const enrollInfo = ref<{ token: string; expiresIn: string } | null>(null)
+
+function openRegisterTarget() {
+  targetForm.name = ''
+  targetForm.vendor = ''
+  targetForm.region = ''
+  targetForm.targetKind = 'k8s'
+  targetForm.kubeconfig = ''
+  kubeParse.value = null
+  kubeParseErr.value = ''
+  enrollInfo.value = null
+  targetModal.value = true
+}
+
+async function previewKubeconfig() {
+  if (targetForm.targetKind !== 'k8s' || !targetForm.kubeconfig.trim()) return
+  kubeParseErr.value = ''
+  try {
+    kubeParse.value = await credentialApi.parseKubeconfig(targetForm.kubeconfig)
+    const errs = kubeParse.value.errors || []
+    if (errs.length) kubeParseErr.value = errs.join('；')
+  } catch (e) {
+    kubeParseErr.value = failMsg(e)
+    kubeParse.value = null
+  }
+}
+
+async function saveTarget() {
+  if (!targetForm.name.trim()) {
+    toast.err('请填写目标名称')
+    return
+  }
+  if (!targetForm.vendor.trim() || !targetForm.region.trim()) {
+    toast.err('请填写厂商与区域')
+    return
+  }
+  targetSaving.value = true
+  try {
+    const t = await targetApi.create({
+      name: targetForm.name.trim(),
+      vendor: targetForm.vendor.trim(),
+      region: targetForm.region.trim(),
+      targetKind: targetForm.targetKind,
+    })
+    // 注册即申请一次性 enroll token（失败不阻塞：可之后在 Runner 侧重试）。
+    try {
+      const et = await targetApi.enrollToken(t.id)
+      enrollInfo.value = { token: et.enrollToken, expiresIn: et.expiresIn }
+    } catch {
+      enrollInfo.value = null
+    }
+    toast.ok('已注册接入目标')
+    const c = await targetApi.list({ page: 1, pageSize: 100 })
+    targets.value = c.items
+    if (!enrollInfo.value) targetModal.value = false
+  } catch (e) {
+    toast.err(failMsg(e))
+  } finally {
+    targetSaving.value = false
+  }
+}
+
 function fmtHeartbeat(s?: string) {
   if (!s) return '—'
   const sec = Math.round((Date.now() - new Date(s).getTime()) / 1000)
@@ -271,7 +379,7 @@ function fmtHeartbeat(s?: string) {
 <template>
   <div>
     <div class="page-head">
-      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : section === 'targets' ? '接入管理' : '凭据管理' }}</h1>
+      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : section === 'targets' ? '接入管理' : section === 'audit' ? '平台审计日志' : '凭据管理' }}</h1>
       <div class="sub" v-if="section === 'credentials'">
         凭据注册与加密存储：hub 侧 AES-GCM 信封加密，明文不回流 console（仅创建/修改请求携带）。
       </div>
@@ -285,6 +393,7 @@ function fmtHeartbeat(s?: string) {
       <router-link class="tab" :class="{ active: section === 'permissions' }" to="/admin/permissions">用户与平台权限</router-link>
       <router-link class="tab" :class="{ active: section === 'targets' }" to="/admin/targets">接入管理</router-link>
       <router-link class="tab" :class="{ active: section === 'credentials' }" to="/admin/credentials">凭据管理</router-link>
+      <router-link class="tab" :class="{ active: section === 'audit' }" to="/admin/audit">审计日志</router-link>
     </div>
 
     <template v-if="section === 'permissions'">
@@ -428,13 +537,19 @@ function fmtHeartbeat(s?: string) {
     </template>
 
     <template v-else-if="section === 'targets'">
+      <div class="toolbar">
+        <h2 class="h2" style="margin: 0">接入目标</h2>
+        <div class="spacer"></div>
+        <button class="btn btn-pearl" @click="openRegisterTarget">＋ 注册目标</button>
+      </div>
       <div class="card flush">
         <div v-if="loading" class="loading">加载中…</div>
-        <div v-else-if="targets.length === 0" class="empty">暂无接入目标。Runner 上线后自动注册。</div>
+        <div v-else-if="targets.length === 0" class="empty">暂无接入目标。可手动注册，Runner 上线后也会自动注册。</div>
         <table v-else class="table">
           <thead>
             <tr>
               <th>名称</th>
+              <th>类型</th>
               <th>厂商</th>
               <th>区域</th>
               <th>状态</th>
@@ -446,6 +561,7 @@ function fmtHeartbeat(s?: string) {
           <tbody>
             <tr v-for="c in targets" :key="c.id">
               <td><b>{{ c.name }}</b></td>
+              <td><span class="chip">{{ c.targetKind === 'host' ? '主机' : 'K8s' }}</span></td>
               <td>{{ c.vendor || '—' }}</td>
               <td>{{ c.region || '—' }}</td>
               <td>
@@ -466,6 +582,75 @@ function fmtHeartbeat(s?: string) {
 
     <template v-else-if="section === 'credentials'">
       <CredentialsView />
+    </template>
+
+    <!-- 平台审计日志（STATUS #19 消费端）：hub AuditMiddleware 逐条留痕的只读视图。
+         权限说明：hub 侧端点要求平台级 user:manage，403 由 http 拦截器统一跳 Forbidden。 -->
+    <template v-else-if="section === 'audit'">
+      <div class="toolbar" style="margin-top: 0">
+        <input
+          v-model="auditFilter.actionPrefix"
+          class="input"
+          style="max-width: 220px"
+          type="text"
+          placeholder="action 前缀，如 approval."
+          @keyup.enter="loadAuditLogs"
+        />
+        <input
+          v-model="auditFilter.subject"
+          class="input"
+          style="max-width: 220px"
+          type="text"
+          placeholder="主体（sub 或 /组路径）"
+          @keyup.enter="loadAuditLogs"
+        />
+        <button class="btn btn-primary btn-sm" @click="loadAuditLogs">查询</button>
+        <div class="spacer"></div>
+        <span class="muted">共 {{ auditRows.length }} 条（最新优先，默认近 200 条）</span>
+      </div>
+      <div class="card flush" style="margin-top: 14px">
+        <div v-if="auditLoading" class="loading">加载中…</div>
+        <div v-else-if="auditRows.length === 0" class="empty">暂无审计记录（变更发生后这里会有留痕）</div>
+        <table v-else class="table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>主体</th>
+              <th>动作</th>
+              <th>资源</th>
+              <th>结果</th>
+              <th>来源 IP</th>
+              <th>详情</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in auditRows" :key="a.id">
+              <td class="mono">{{ fmtAuditTime(a.timestamp) }}</td>
+              <td>
+                <span class="chip">{{ a.subjectType === 'group' ? '组' : '用户' }}</span>
+                <span class="mono">{{ a.subject }}</span>
+              </td>
+              <td class="mono">{{ a.action }}</td>
+              <td>
+                <template v-if="a.resourceType">
+                  <span class="mono">{{ a.resourceType }}</span>
+                  <span class="mono muted" v-if="a.resourceId"> / {{ a.resourceId.slice(0, 8) }}</span>
+                </template>
+                <span v-else class="muted">—</span>
+              </td>
+              <td>
+                <span class="badge" :class="a.result === 'success' ? 'b-succ' : 'b-fail'">
+                  <span class="pt"></span>{{ a.result === 'success' ? `成功 ${a.statusCode}` : `失败 ${a.statusCode}` }}
+                </span>
+              </td>
+              <td class="mono">{{ a.sourceIP || '—' }}</td>
+              <td class="muted" style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+                {{ a.detail || '—' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
 
     <!-- 平台角色 编辑/新建 -->
@@ -595,6 +780,73 @@ function fmtHeartbeat(s?: string) {
         </button>
       </template>
     </Modal>
+
+    <!-- 注册接入目标 -->
+    <Modal :open="targetModal" title="注册接入目标" @close="targetModal = false">
+      <template v-if="!enrollInfo">
+        <div class="field">
+          <label>目标类型</label>
+          <div class="seg">
+            <label :class="{ active: targetForm.targetKind === 'k8s' }">
+              <input type="radio" value="k8s" v-model="targetForm.targetKind" /> Kubernetes 集群
+            </label>
+            <label :class="{ active: targetForm.targetKind === 'host' }">
+              <input type="radio" value="host" v-model="targetForm.targetKind" /> 主机
+            </label>
+          </div>
+        </div>
+        <div class="field">
+          <label>名称</label>
+          <input v-model="targetForm.name" class="input" type="text" placeholder="如 tx-staging-bj（唯一）" />
+        </div>
+        <div style="display: flex; gap: 10px">
+          <div class="field" style="flex: 1">
+            <label>厂商</label>
+            <input v-model="targetForm.vendor" class="input" type="text" placeholder="如 tencent" />
+          </div>
+          <div class="field" style="flex: 1">
+            <label>区域</label>
+            <input v-model="targetForm.region" class="input" type="text" placeholder="如 ap-beijing" />
+          </div>
+        </div>
+        <div class="field" v-if="targetForm.targetKind === 'k8s'">
+          <label>kubeconfig（仅预检，不随目标保存）</label>
+          <textarea v-model="targetForm.kubeconfig" class="input" rows="5" placeholder="粘贴 kubeconfig 全文，点击「预检解析」查看结构"></textarea>
+          <button class="btn btn-pearl btn-sm" type="button" :disabled="!targetForm.kubeconfig.trim()" @click="previewKubeconfig">预检解析</button>
+          <p class="hint">
+            预检只做结构解析（hub 无 client-go，权威校验在连接时进行）。kubeconfig 本体不存进目标 ——
+            请在「凭据管理」创建 kubeconfig 类型凭据并按作用域关联。
+          </p>
+          <div v-if="kubeParse" class="kube-parse">
+            <div><span>Server</span><code>{{ kubeParse.server || '—' }}</code></div>
+            <div><span>认证方式</span><code>{{ kubeParse.authMethod }}</code></div>
+            <div><span>当前上下文</span><code>{{ kubeParse.currentContext || '—' }}</code></div>
+            <div><span>默认命名空间</span><code>{{ kubeParse.defaultNamespace || '—' }}</code></div>
+          </div>
+          <p v-if="kubeParseErr" class="parse-err">{{ kubeParseErr }}</p>
+        </div>
+      </template>
+
+      <!-- 注册成功：一次性 enroll token 只展示这一次 -->
+      <template v-else>
+        <div class="enroll-ok">
+          <b>✓ 目标已注册</b>
+          <p>在目标机器上安装 Runner Agent 时使用下面的一次性注册令牌（{{ enrollInfo.expiresIn }} 内有效，仅可使用一次）：</p>
+          <pre class="enroll-token mono">{{ enrollInfo.token }}</pre>
+          <p class="hint">关闭本弹窗后令牌不再展示；如遗失，可在 Runner 接入流程中重新申请（旧令牌随即作废）。</p>
+        </div>
+      </template>
+
+      <template #foot>
+        <template v-if="!enrollInfo">
+          <button class="btn btn-pearl" @click="targetModal = false">取消</button>
+          <button class="btn btn-primary" :disabled="targetSaving" @click="saveTarget">
+            {{ targetSaving ? '注册中…' : '注册' }}
+          </button>
+        </template>
+        <button v-else class="btn btn-primary" @click="targetModal = false">完成</button>
+      </template>
+    </Modal>
   </div>
 </template>
 
@@ -662,6 +914,32 @@ function fmtHeartbeat(s?: string) {
 .muted {
   color: var(--text-sub);
   font-size: 12px;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.toolbar .spacer { flex: 1; }
+.h2 { font-size: 15px; font-weight: 700; }
+.kube-parse {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.kube-parse > div {
+  display: flex; justify-content: space-between; padding: 2px 0;
+}
+.kube-parse code { font-size: 12px; word-break: break-all; }
+.parse-err { color: var(--failed-fg); font-size: 12px; margin: 6px 0 0; }
+.enroll-ok { font-size: 13px; line-height: 1.6; }
+.enroll-ok > b { color: var(--succeeded-fg); }
+.enroll-token {
+  margin: 8px 0; padding: 10px 12px; background: var(--term-bg); color: var(--term-fg);
+  border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
 .row-actions {
   white-space: nowrap;

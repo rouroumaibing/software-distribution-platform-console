@@ -275,3 +275,16 @@ textarea.input { font-family: var(--mono); font-size: 13px; min-height: 84px; re
 }
 .toast.error { background: var(--failed-fg); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ---------- 窄屏响应式（console P2） ---------- */
+/* 原则：表格列多（运行中心 7 列、审计 6 列）是信息密度的既定取舍，窄屏不做列裁剪
+ * （裁掉哪列都丢关键信息），而是让容器横向滚动 + 收紧行内空间。overflow-x 只在
+ * 窄屏打开，宽屏零影响。 */
+@media (max-width: 768px) {
+  .card { overflow-x: auto; }
+  .table th, .table td { padding: 9px 10px; }
+  .table { font-size: 13px; }
+  .title { font-size: 22px; }
+  .toolbar { flex-wrap: wrap; }
+  .two, .three { grid-template-columns: 1fr; }
+}

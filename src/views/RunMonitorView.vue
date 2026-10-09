@@ -22,6 +22,10 @@ const loading = ref(true)
 const logs = ref<TaskRunLog[]>([])
 const logKey = ref('') // 当前已加载日志的 (run, task) 标识,避免重复拉取
 const logLoading = ref(false)
+// 折叠态（console P2）：长日志默认只显示尾部，避免一次渲染数万行卡 DOM。
+const logExpanded = ref(false)
+/** 折叠时保留的尾部字符数（约最近一屏多）。 */
+const LOG_TAIL_CHARS = 8000
 
 // 审批弹窗
 const approvalModal = ref(false)
@@ -97,6 +101,33 @@ watch(selected, () => {
 
 const isActive = computed(() => run.value && ['Running', 'Pending'].includes(run.value.phase))
 const waitingApproval = computed(() => run.value?.phase === 'WaitingApproval')
+
+// ---- 日志展示（console P2：下载 / 折叠 / 流式指示）----
+const logText = computed(() => logs.value.map((l) => l.chunk).join(''))
+
+const logTruncated = computed(() => logText.value.length > LOG_TAIL_CHARS)
+
+/** 折叠态只渲染尾部 LOG_TAIL_CHARS 字符（前端聚合窗口内已拉 500 块，够近一屏）。 */
+const displayLogText = computed(() => {
+  if (logExpanded.value || !logTruncated.value) return logText.value
+  return '…（前段已折叠，展开或下载查看全部）\n' + logText.value.slice(-LOG_TAIL_CHARS)
+})
+
+function toggleLog() {
+  logExpanded.value = !logExpanded.value
+}
+
+/** 本地导出当前 (run, task) 日志为 .log 文本文件。 */
+function downloadLog() {
+  if (!logs.value.length) return
+  const blob = new Blob([logText.value], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${runId}-${selected.value?.taskName ?? 'run'}.log`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 function nodeClass(t: TaskRun): string {
   switch (t.phase) {
@@ -307,10 +338,16 @@ function duration(t: TaskRun) {
         <div class="card log-panel">
           <div class="log-head">
             <b>日志</b>
+            <span v-if="isActive && logs.length" class="live-dot" title="运行活跃，日志随轮询实时刷新">● 实时</span>
             <span class="sub mono">{{ selected ? selected.taskName : '运行级' }}</span>
+            <span style="flex: 1"></span>
+            <button v-if="logTruncated" class="btn btn-pearl btn-sm" @click="toggleLog">
+              {{ logExpanded ? '折叠' : '展开全部' }}
+            </button>
+            <button class="btn btn-pearl btn-sm" :disabled="!logs.length" @click="downloadLog">下载</button>
             <button class="btn btn-pearl btn-sm" :disabled="logLoading" @click="loadLogs">刷新</button>
           </div>
-          <pre v-if="logs.length" class="log-out">{{ logs.map((l) => l.chunk).join('') }}</pre>
+          <pre v-if="logs.length" class="log-out">{{ displayLogText }}</pre>
           <div v-else-if="logLoading" class="empty">加载中…</div>
           <div v-else class="empty">
             {{ isActive ? '任务运行中，日志流实时回传中…' : '暂无日志' }}
@@ -369,6 +406,8 @@ function duration(t: TaskRun) {
 .kv-list .row span:first-child { color: var(--sub); }
 .log-panel { min-height: 220px; }
 .log-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.live-dot { color: var(--running-fg, #1673ff); font-size: 12px; animation: log-pulse 1.6s ease-in-out infinite; }
+@keyframes log-pulse { 50% { opacity: 0.35; } }
 .log-out {
   margin: 0;
   padding: 12px;

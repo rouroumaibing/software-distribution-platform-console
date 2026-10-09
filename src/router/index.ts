@@ -65,6 +65,13 @@ const router = createRouter({
         { path: 'admin/permissions', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'permissions' }, meta: { title: '用户与平台权限' } },
         { path: 'admin/targets', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'targets' }, meta: { title: '接入管理' } },
         { path: 'admin/credentials', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'credentials' }, meta: { title: '凭据管理' } },
+        { path: 'admin/audit', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'audit' }, meta: { title: '平台审计日志' } },
+
+        // ---- 全局错误态（STATUS #21）----
+        // 403：http 响应拦截器（api/http.ts）统一跳转；也可直达 /forbidden。
+        { path: 'forbidden', component: () => import('@/views/ErrorView.vue'), props: { kind: 'forbidden' }, meta: { title: '没有访问权限' } },
+        // 404：catch-all 必须放 children 最后；/forbidden 自身不进 catch-all。
+        { path: ':pathMatch(.*)*', component: () => import('@/views/ErrorView.vue'), props: { kind: 'not-found' }, meta: { title: '页面不存在' } },
         { path: 'admin/targets/:targetId/agent-ops', component: () => import('@/views/AgentOpsView.vue'), props: true, meta: { title: '操作台账' } },
         { path: 'admin/clusters', redirect: '/admin/targets' },
 

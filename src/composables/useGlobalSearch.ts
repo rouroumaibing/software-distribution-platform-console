@@ -56,10 +56,28 @@ const serverActive = computed(() => {
   return q.length > 0 && state.serverQuery === state.debounced && !state.serverError
 })
 
-/** 结果只取前 SEARCH_LIMIT 条（§5.3）；空查询给一份可浏览的尾部视图。 */
-const hits = computed(() =>
-  serverActive.value ? matchHits(state.serverHits, state.debounced) : matchHits(state.index, state.debounced),
-)
+// 平台级页面直达（console P2：⌘K 非组件直达）。纯客户端静态池 —— 不依赖资源索引
+// （那要打 4 层 API）也不依赖服务端 /search，索引挂了 / 服务端挂了都能直达页面。
+// nav 的 id = 路由 path（searchHitRoute 的 'nav' 分支直接跳）。排在本轮结果尾部：
+// 空查询的头部视图仍是资源（§5.3 既定），键入页面名或「页面」时才浮上来。
+const NAV_HITS: SearchHit[] = [
+  { kind: 'nav', id: '/dashboard', name: '总览', path: '页面' },
+  { kind: 'nav', id: '/service-tree', name: '服务树', path: '页面' },
+  { kind: 'nav', id: '/runs', name: '运行中心', path: '页面' },
+  { kind: 'nav', id: '/admin/permissions', name: '用户与平台权限', path: '页面 · 平台管理' },
+  { kind: 'nav', id: '/admin/targets', name: '接入管理', path: '页面 · 平台管理' },
+  { kind: 'nav', id: '/admin/credentials', name: '凭据管理', path: '页面 · 平台管理' },
+  { kind: 'nav', id: '/admin/audit', name: '平台审计日志', path: '页面 · 平台管理' },
+]
+
+/** 结果只取前 SEARCH_LIMIT 条（§5.3）；空查询给一份可浏览的尾部视图。
+ *  nav 页面直达项追加在资源结果之后，再整体截到 SEARCH_LIMIT。 */
+const hits = computed(() => {
+  const base = serverActive.value
+    ? matchHits(state.serverHits, state.debounced)
+    : matchHits(state.index, state.debounced)
+  return [...base, ...matchHits(NAV_HITS, state.debounced)].slice(0, SEARCH_LIMIT)
+})
 
 const status = computed<PaletteStatus>(() => {
   const q = state.debounced.trim()

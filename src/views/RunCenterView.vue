@@ -30,8 +30,10 @@ import {
   DEFAULT_RUN_VIEW,
   getRunView,
   runQueryParams,
+  RUN_TIME_RANGES,
   RUN_VIEWS,
   sameQuery,
+  timeToCreatedAfter,
   type RunViewKey,
 } from '@/constants/runCenter'
 
@@ -44,6 +46,9 @@ const AGGREGATE_SCAN = 200
 
 const view = ref<RunViewKey>(DEFAULT_RUN_VIEW)
 const phase = ref('')
+const time = ref('') // 时间范围 key（'' = 全部），下推 hub createdAfter
+const componentId = ref('') // 组件筛选（'' = 全部），下推 hub componentId
+const triggeredBy = ref('') // 触发人筛选（'' = 全部），下推 hub triggeredBy
 const page = ref(1)
 const total = ref(0)
 
@@ -75,6 +80,9 @@ async function syncRoute() {
   }
   view.value = q.view
   phase.value = q.phase
+  time.value = q.time
+  componentId.value = q.componentId
+  triggeredBy.value = q.triggeredBy
   page.value = q.page
   await load()
 }
@@ -88,23 +96,45 @@ function currentQuery(): Record<string, string> {
 }
 
 // ---- 交互 → URL（全部 replace，见约束 ③）----
+// query 组装统一走这里：切视图 = 换一批数据，筛选与页码一并回到默认；
+// 其余动作只改自己那一维，其他维度（phase / time / page）原样保留。
+function buildQuery(overrides: Record<string, string | undefined>): Record<string, string> {
+  const q: Record<string, string> = { view: view.value }
+  if (phase.value) q.phase = phase.value
+  if (time.value) q.time = time.value
+  if (componentId.value) q.componentId = componentId.value
+  if (triggeredBy.value) q.triggeredBy = triggeredBy.value
+  if (page.value > 1) q.page = String(page.value)
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === undefined || v === '') delete q[k]
+    else q[k] = v
+  }
+  return q
+}
+
 function setView(v: RunViewKey) {
   if (v === view.value) return
-  // 切视图 = 换一批数据，筛选与页码一并回到默认
   void router.replace({ path: '/runs', query: { view: v } })
 }
 
 function setPhase(f: string) {
-  const q: Record<string, string> = { view: view.value }
-  if (f) q.phase = f
-  void router.replace({ path: '/runs', query: q })
+  void router.replace({ path: '/runs', query: buildQuery({ phase: f, page: '1' }) })
+}
+
+function setTime(t: string) {
+  void router.replace({ path: '/runs', query: buildQuery({ time: t, page: '1' }) })
+}
+
+function setComponent(id: string) {
+  void router.replace({ path: '/runs', query: buildQuery({ componentId: id, page: '1' }) })
+}
+
+function setTriggeredBy(v: string) {
+  void router.replace({ path: '/runs', query: buildQuery({ triggeredBy: v.trim(), page: '1' }) })
 }
 
 function setPage(p: number) {
-  const q: Record<string, string> = { view: view.value }
-  if (phase.value) q.phase = phase.value
-  if (p > 1) q.page = String(p)
-  void router.replace({ path: '/runs', query: q })
+  void router.replace({ path: '/runs', query: buildQuery({ page: p > 1 ? String(p) : '' }) })
 }
 
 // ---- 加载 ----
@@ -121,11 +151,18 @@ async function load() {
     index.value = idx
 
     if (view.value === 'releases') {
-      // 发布 = kind==='release' 的流水线的运行。hub 的 GET /runs 只能按 phase 过滤，
-      // 按 kind 过滤只能前端做 —— 所以这里扫描一屏运行再筛（N-3 落地后可换成
-      // GET /releases?scope=global）。
+      // 发布 = kind==='release' 的流水线的运行。hub 的 GET /runs 只能按 phase /
+      // createdAfter 过滤，按 kind 过滤只能前端做 —— 所以这里扫描一屏运行再筛
+      // （N-3 落地后可换成 GET /releases?scope=global）。
       const snap = await runApi
-        .listAll({ page: 1, pageSize: AGGREGATE_SCAN, phase: phase.value || undefined })
+        .listAll({
+          page: 1,
+          pageSize: AGGREGATE_SCAN,
+          phase: phase.value || undefined,
+          createdAfter: timeToCreatedAfter(time.value),
+          componentId: componentId.value || undefined,
+          triggeredBy: triggeredBy.value || undefined,
+        })
         .catch(() => undefined)
       if (t !== token) return
       const rel = (snap?.items ?? []).filter((r) => idx.byPipelineId.get(r.pipelineId)?.kind === 'release')
@@ -135,11 +172,14 @@ async function load() {
       return
     }
 
-    // 运行视图：phase 下推服务端
+    // 运行视图：phase / createdAfter / componentId / triggeredBy 下推服务端
     const p = await runApi.listAll({
       page: page.value,
       pageSize: PAGE_SIZE,
       phase: phase.value || undefined,
+      createdAfter: timeToCreatedAfter(time.value),
+      componentId: componentId.value || undefined,
+      triggeredBy: triggeredBy.value || undefined,
     })
     if (t !== token) return
     truncated.value = false
@@ -204,6 +244,28 @@ function openComponent(componentId: string) {
         :class="phase === f.value ? 'btn-dark' : 'btn-pearl'"
         @click="setPhase(f.value)"
       >{{ f.label }}</button>
+      <span style="width: 1px; height: 16px; background: var(--hairline); margin: 0 6px"></span>
+      <button
+        v-for="t in RUN_TIME_RANGES"
+        :key="t.value"
+        class="btn btn-sm"
+        :class="time === t.value ? 'btn-dark' : 'btn-pearl'"
+        @click="setTime(t.value)"
+      >{{ t.label }}</button>
+      <span style="width: 1px; height: 16px; background: var(--hairline); margin: 0 6px"></span>
+      <select class="select" :value="componentId" @change="setComponent(($event.target as HTMLSelectElement).value)">
+        <option value="">全部组件</option>
+        <option v-for="c in index.components" :key="c.componentId" :value="c.componentId">
+          {{ c.componentName }}
+        </option>
+      </select>
+      <input
+        class="input"
+        style="width: 130px"
+        placeholder="触发人…"
+        :value="triggeredBy"
+        @change="setTriggeredBy(($event.target as HTMLInputElement).value)"
+      />
       <div class="spacer"></div>
       <span class="sub">
         共 {{ total }} 条<template v-if="truncated">（按最近 {{ AGGREGATE_SCAN }} 条运行聚合，全局聚合端点待补）</template>
