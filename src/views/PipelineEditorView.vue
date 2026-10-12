@@ -14,9 +14,11 @@ import Modal from '@/components/Modal.vue'
 import PipelineVersionPanel from '@/components/PipelineVersionPanel.vue'
 import TaskFormDrawer from '@/components/TaskFormDrawer.vue'
 import TriggerRunDialog from '@/components/TriggerRunDialog.vue'
+import TriggerPanel from '@/components/TriggerPanel.vue'
 import {
   pipelineApi,
   type Pipeline,
+  type ParamDecl,
   type PipelineStage,
   type PipelineTaskTemplate,
 } from '@/api/pipeline'
@@ -35,6 +37,7 @@ import {
   objToYaml,
   readDeleteVerdict,
   readErrorAxios,
+  sanitizeParamDecls,
   taskTypeClass,
   taskTypeIcon,
   type DeleteVerdict,
@@ -55,10 +58,17 @@ const dirty = ref(false)
 
 // 头部元信息草稿（[保存] 才落库）。kind 必须窄化为 Pipeline['kind'] ——
 // 否则 ref 推断成 string，绑到 <select v-model> 上 TS2322。
-const meta = ref<{ name: string; kind: Pipeline['kind']; description: string }>({
+// params：运行时参数声明草稿（ui-12 §5.3），同样 [保存] 才落库。
+const meta = ref<{
+  name: string
+  kind: Pipeline['kind']
+  description: string
+  params: ParamDecl[]
+}>({
   name: '',
   kind: 'build',
   description: '',
+  params: [],
 })
 
 // 抽屉 / 弹窗状态
@@ -71,6 +81,8 @@ const stageName = ref('')
 const metaOpen = ref(false)
 /** 版本历史面板（C-09）。 */
 const versionOpen = ref(false)
+/** 触发器面板（ui-12 §4.3 / N-21）。 */
+const triggersOpen = ref(false)
 
 onMounted(load)
 
@@ -80,7 +92,12 @@ async function load() {
     // ① 直取单条（不走组件列表 find）
     const p = await pipelineApi.get(pipelineId)
     pipeline.value = p
-    meta.value = { name: p.name, kind: p.kind, description: p.description ?? '' }
+    meta.value = {
+      name: p.name,
+      kind: p.kind,
+      description: p.description ?? '',
+      params: p.params ?? [],
+    }
 
     const list = await pipelineApi.listStages(pipelineId)
     stages.value = [...list].sort((a, b) => a.sequence - b.sequence)
@@ -97,6 +114,11 @@ async function load() {
 }
 
 const componentId = computed(() => pipeline.value?.componentId)
+
+// 切换参数类型时清掉不兼容的默认值（boolean 的 'abc'、choice 的旧值都无意义）。
+function onParamTypeChange(d: ParamDecl) {
+  d.default = ''
+}
 
 /** 防御：老数据 / 半写状态下 executionMode 可能为空，一律按默认 parallel 展示。 */
 function modeOf(s: PipelineStage): StageExecutionMode {
@@ -217,6 +239,7 @@ const requestBody = computed<PipelineRequestBody>(() => ({
   name: meta.value.name.trim(),
   kind: meta.value.kind,
   description: meta.value.description.trim() || undefined,
+  params: sanitizeParamDecls(meta.value.params),
   stages: stages.value.map((s, i) => ({
     name: s.name,
     sequence: i + 1,
@@ -253,11 +276,12 @@ function openPreview() {
 async function commitSave() {
   saving.value = true
   try {
-    // ① 元信息
+    // ① 元信息 + 运行时参数声明（声明随 PUT /pipelines/:id 一并落库）
     await pipelineApi.update(pipelineId, {
       name: meta.value.name.trim(),
       kind: meta.value.kind,
       description: meta.value.description.trim(),
+      params: sanitizeParamDecls(meta.value.params),
     })
     // ② 阶段：sequence + executionMode
     for (let i = 0; i < stages.value.length; i++) {
@@ -335,6 +359,7 @@ async function submitDelete() {
         <div class="toolbar">
           <button class="btn btn-pearl" @click="stageModal = true">＋ 新建阶段</button>
           <button class="btn btn-pearl" @click="metaOpen = true">编辑信息</button>
+          <button class="btn btn-pearl" @click="triggersOpen = true">触发器</button>
           <button class="btn btn-pearl" @click="versionOpen = true">版本历史</button>
           <div class="spacer"></div>
           <button class="btn btn-pearl" @click="router.push(`/pipelines/${pipelineId}/runs`)">
@@ -434,6 +459,9 @@ async function submitDelete() {
       @triggered="(r) => router.push(`/pipelines/${pipelineId}/runs/${r.id}`)"
     />
 
+    <!-- 触发器配置（ui-12 §4.3 / N-21） -->
+    <TriggerPanel :open="triggersOpen" :pipeline-id="pipelineId" @close="triggersOpen = false" />
+
     <!-- 版本历史 / 对比 / 回滚（C-09）。回滚后重新拉取定义 —— 阶段与子任务的行
          id 全变了，沿用旧数组会让后续编辑打到已软删的行上。 -->
     <PipelineVersionPanel
@@ -473,6 +501,39 @@ async function submitDelete() {
       <div class="field">
         <label>描述</label>
         <input v-model="meta.description" class="input" placeholder="可选" />
+      </div>
+      <div class="field">
+        <label>运行参数声明（触发弹窗按此渲染表单；留空 name 的行保存时丢弃）</label>
+        <div v-for="(d, i) in meta.params" :key="i" class="pdecl-row">
+          <div class="pdecl-main">
+            <input v-model="d.name" class="input pd-name" placeholder="参数名*" />
+            <select v-model="d.type" class="select pd-type" @change="onParamTypeChange(d)">
+              <option value="string">文本</option>
+              <option value="number">数字</option>
+              <option value="boolean">布尔</option>
+              <option value="choice">枚举</option>
+            </select>
+            <input v-if="d.type !== 'boolean'" v-model="d.default" class="input pd-default" placeholder="默认值" />
+            <select v-else v-model="d.default" class="select pd-default">
+              <option value="">（无默认）</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+            <label class="pd-required"><input v-model="d.required" type="checkbox" /> 必填</label>
+            <button class="kv-del" title="删除该参数" @click="meta.params.splice(i, 1)">×</button>
+          </div>
+          <input
+            v-if="d.type === 'choice'"
+            :value="(d.options ?? []).join(',')"
+            class="input pd-options"
+            placeholder="枚举项，逗号分隔（如 dev,test,prod）"
+            @input="d.options = ($event.target as HTMLInputElement).value.split(',')"
+          />
+        </div>
+        <button class="link-btn" @click="meta.params.push({ name: '', type: 'string', default: '', options: [] })">
+          ＋ 声明参数
+        </button>
+        <div class="hint">解析优先级：触发时输入 &gt; 组件变量 &gt; 变量组 &gt; 此处声明默认值；密钥不进参数。</div>
       </div>
       <template #foot>
         <button class="btn btn-pearl" @click="metaOpen = false">关闭</button>
@@ -544,6 +605,14 @@ async function submitDelete() {
 </template>
 
 <style scoped>
+/* 运行参数声明（ui-12 §5.3）：编辑信息弹窗内的声明行组。 */
+.pdecl-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.pdecl-main { display: flex; align-items: center; gap: 8px; }
+.pdecl-main .pd-name { flex: 1.2; min-width: 0; }
+.pdecl-main .pd-type { flex: 0 0 84px; }
+.pdecl-main .pd-default { flex: 1; min-width: 0; }
+.pdecl-main .pd-required { font-size: 12px; color: var(--text-sub); white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.pdecl-row .pd-options { font-size: 12px; }
 .dirty { color: var(--warning-fg); font-weight: 600; }
 .flow { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding-bottom: 8px; }
 .stage { flex: 0 0 320px; }

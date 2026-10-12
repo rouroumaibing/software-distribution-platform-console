@@ -154,14 +154,14 @@ check('面包屑第二段来自 RUN_VIEWS', () => {
 })
 
 // ---- 视图定义不变量 ----
-check('恰好 2 个视图（运行 / 发布），顺序与命名固定', () => {
+check('恰好 3 个视图（运行 / 发布 / 审批），顺序与命名固定（§5.1 审批中心第三视图）', () => {
   assert.deepEqual(
     RUN_VIEWS.map((v) => v.key),
-    ['runs', 'releases'],
+    ['runs', 'releases', 'approvals'],
   )
   assert.deepEqual(
     RUN_VIEWS.map((v) => v.label),
-    ['运行', '发布'],
+    ['运行', '发布', '审批'],
   )
 })
 

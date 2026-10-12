@@ -26,6 +26,14 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+// 触发方式标签（ui-12 §4.3 运行列表「触发方式」列）。
+const SOURCE_LABEL: Record<string, string> = {
+  manual: '手动',
+  cron: '定时',
+  webhook: 'Webhook',
+  event: '上游',
+}
 </script>
 
 <template>
@@ -33,13 +41,14 @@ onMounted(async () => {
     <div v-if="loading" class="loading">加载中…</div>
     <div v-else-if="runs.length === 0" class="empty">暂无运行记录</div>
     <table v-else class="table">
-      <thead><tr><th>运行</th><th>流水线</th><th>触发人</th><th>状态</th><th>开始时间</th></tr></thead>
+      <thead><tr><th>运行</th><th>流水线</th><th>触发人</th><th>方式</th><th>状态</th><th>开始时间</th></tr></thead>
       <tbody>
         <tr v-for="r in runs" :key="r.id" style="cursor: pointer"
             @click="router.push(`/pipelines/${r.pipelineId}/runs/${r.id}`)">
           <td class="mono">{{ r.crName || r.id.slice(0, 8) }}</td>
           <td>{{ r.pipelineName }}</td>
           <td>{{ r.triggeredBy || '—' }}</td>
+          <td><span class="src-tag" :data-src="r.triggerSource || 'manual'">{{ SOURCE_LABEL[r.triggerSource || 'manual'] }}</span></td>
           <td><StatusBadge :phase="r.phase" /></td>
           <td class="mono">{{ r.startTime ? new Date(r.startTime).toLocaleString('zh-CN', { hour12: false }) : '—' }}</td>
         </tr>
@@ -47,3 +56,11 @@ onMounted(async () => {
     </table>
   </div>
 </template>
+
+<style scoped>
+/* 触发方式标签：cron/webhook/event 用 accent 提示非手动，manual 弱化。 */
+.src-tag { font-size: 11px; border: 1px solid var(--hairline); border-radius: 6px; padding: 1px 6px; color: var(--text-sub); }
+.src-tag[data-src='cron'], .src-tag[data-src='webhook'], .src-tag[data-src='event'] {
+  border-color: var(--accent); color: var(--accent);
+}
+</style>

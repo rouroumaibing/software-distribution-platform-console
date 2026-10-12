@@ -2,6 +2,7 @@
 // 配置（参数管理）Tab：由原 ComponentDetailView 单页的 config 区块迁移。
 import { onMounted, ref } from 'vue'
 import Modal from '@/components/Modal.vue'
+import ConfigVersionDrawer from '@/components/ConfigVersionDrawer.vue'
 import { componentApi, type ComponentConfig } from '@/api/component'
 import { environmentApi, type Environment } from '@/api/environment'
 import { toast } from '@/utils/toast'
@@ -15,6 +16,8 @@ const loading = ref(true)
 const modal = ref(false)
 const editing = ref<ComponentConfig | null>(null)
 const form = ref({ key: '', value: '', isSecret: false, secretRef: '', description: '', environmentId: '' })
+// 整环境配置版本历史（ui-12 §4.1/§4.2）
+const cvOpen = ref(false)
 
 onMounted(async () => {
   try {
@@ -92,6 +95,7 @@ const envName = (id?: string) => envs.value.find((e) => e.id === id)?.name ?? (i
         <option v-for="e in envs" :key="e.id" :value="e.id">{{ e.name }}</option>
       </select>
       <div class="spacer"></div>
+      <button class="btn btn-pearl" title="配置版本历史（整环境快照 + diff + 回滚）" @click="cvOpen = true">⟳ 版本历史</button>
       <button class="btn btn-pearl" @click="openCreate">＋ 新增参数</button>
     </div>
     <div class="card flush">
@@ -116,6 +120,14 @@ const envName = (id?: string) => envs.value.find((e) => e.id === id)?.name ?? (i
         </tbody>
       </table>
     </div>
+
+    <ConfigVersionDrawer
+      :open="cvOpen"
+      :component-id="componentId"
+      :environments="envs.map((e) => ({ id: e.id, name: e.name }))"
+      @close="cvOpen = false"
+      @rolledback="load"
+    />
 
     <Modal :open="modal" :title="editing ? `编辑参数 · ${editing.key}` : '新增参数'" @close="modal = false">
       <div class="field">

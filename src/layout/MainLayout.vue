@@ -93,7 +93,7 @@ onMounted(startNotifPolling)
 onBeforeUnmount(stopNotifPolling)
 
 // 图标是**本地常量**的 SVG 片段（不含任何用户输入），故可安全用 v-html 注入；
-// 路径照抄原型 CONSOLE-UI-原型.html 的 ICON 表，线宽/圆角由 CSS 统一控制。
+// 路径照抄原型 CONSOLE-UI-prototype.html 的 ICON 表，线宽/圆角由 CSS 统一控制。
 const ICON = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   layers: '<polygon points="12 3 21 8 12 13 3 8"/><polyline points="3 13 12 18 21 13"/>',
@@ -251,6 +251,9 @@ async function logout() {
                   <div class="np-body">{{ n.body }}</div>
                 </li>
               </ul>
+              <div class="np-foot">
+                <RouterLink class="np-settings" to="/notifications/settings" @click="notifOpen = false">通知设置（邮件订阅）</RouterLink>
+              </div>
             </div>
           </div>
           <div class="user-chip">
@@ -277,6 +280,8 @@ async function logout() {
                 <span v-else class="muted">—</span>
               </div>
               <p class="pf-hint">身份由 Keycloak 提供；平台/组件权限在各管理页按绑定展示（hub 不存用户表）。</p>
+              <router-link class="pf-link" to="/me/tokens" @click="profileOpen = false">访问令牌（PAT）</router-link>
+              <router-link class="pf-link" to="/notifications/settings" @click="profileOpen = false">通知订阅（邮件）</router-link>
             </div>
           </div>
         </div>
@@ -364,6 +369,8 @@ async function logout() {
 .si { display: inline-flex; }
 .si :deep(svg) { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; }
 
+.pf-link { display: block; font-size: 13px; color: var(--accent); text-decoration: none; margin-top: 6px; }
+.pf-link:hover { text-decoration: underline; }
 .user-chip { display: flex; align-items: center; gap: 8px; margin-left: 6px; position: relative; }
 .chip-btn {
   display: flex; align-items: center; gap: 8px; background: none; border: none;
@@ -410,6 +417,9 @@ async function logout() {
 }
 .np-head .sub { font-size: 12px; color: var(--text-sub); font-weight: 400; }
 .np-empty { padding: 22px 14px; text-align: center; color: var(--text-sub); font-size: 13px; }
+.np-foot { border-top: 1px solid var(--hairline); padding: 8px 14px; }
+.np-settings { font-size: 12px; color: var(--accent); text-decoration: none; }
+.np-settings:hover { text-decoration: underline; }
 .np-list { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow-y: auto; }
 .np-list li { padding: 11px 14px; border-bottom: 1px solid var(--hairline-2); cursor: pointer; }
 .np-list li:last-child { border-bottom: none; }

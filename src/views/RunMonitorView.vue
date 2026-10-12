@@ -5,7 +5,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Modal from '@/components/Modal.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { runApi, type PipelineRun, type TaskRun, type TaskRunLog } from '@/api/run'
+import { runApi, streamRunLogs, type PipelineRun, type TaskRun, type TaskRunLog } from '@/api/run'
 import { isRunCancellable, isTaskRerunnable } from '@/utils/run'
 import { toast } from '@/utils/toast'
 
@@ -42,11 +42,30 @@ onMounted(async () => {
       await pollProgress()
     }
   }, 3000)
+  // 运行级日志 SSE（ui-12 §5.5）：活跃时订阅增量，end/错误后静默 —— 轮询兜底不变。
+  startLogStream()
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  logStream?.abort()
 })
+
+let logStream: AbortController | undefined
+
+function startLogStream() {
+  logStream = streamRunLogs(runId, {
+    onLog: (chunk) => {
+      // run 级流是全任务混流：只保留当前视图桶（__run__ = 无任务名块；选中任务 = 同名块）。
+      const bucket = selected.value?.taskName ?? '__run__'
+      const matches = bucket === '__run__' ? !chunk.taskName : chunk.taskName === bucket
+      if (matches) logs.value.push(chunk)
+    },
+    onError: () => {
+      /* SSE 失败静默：3s 轮询兜底仍在 */
+    },
+  })
+}
 
 async function refresh() {
   run.value = await runApi.get(runId)

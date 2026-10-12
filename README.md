@@ -72,7 +72,7 @@ console 的 HTTPS 由**两个集群内 Secret** 承载，**镜像与交付包不
 本组件的设计文档（UI 设计、IA 原型、实现 Story、验收标准等）统一存放在独立的 [`software-distribution-platform-docs`](https://github.com/rouroumaibing/software-distribution-platform-docs) 仓库（单一真源），本仓库只保留指针、不存放设计文档正文。
 
 - 前端设计文档（唯一事实源，IA v3）：[`console/CONSOLE-UI-DESIGN.md`](https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI-DESIGN.md)
-- IA v3 可交互原型：[`console/CONSOLE-UI-原型.html`](https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI-原型.html)
+- IA v3 可交互原型：[`console/CONSOLE-UI-prototype.html`](https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/console/CONSOLE-UI-prototype.html)
 - 跨组件对齐（整体目标 / 授权模型 G7 / 执行模型）：见 docs 仓库 [`README.md` §5](https://github.com/rouroumaibing/software-distribution-platform-docs/blob/main/README.md)
 
 > 本仓库 `docs/design/README.md` 仅保留一个指针，指向上述统一文档库；设计文档的修改请在 docs 仓库进行。

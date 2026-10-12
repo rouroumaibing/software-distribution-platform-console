@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  buildDeclaredRunParams,
   buildPipelineRequest,
   changeClass,
   changeLabel,
@@ -30,6 +31,7 @@ import {
   rollbackWarning,
   runPhaseClass,
   runPhaseLabel,
+  sanitizeParamDecls,
   showFieldValue,
   summarizeDiff,
   taskNature,
@@ -592,6 +594,90 @@ check('触发对话框：.refusal 有样式定义（引用未定义类名 = 静�
   assert.ok(src.includes('class="refusal"'), '模板未使用 .refusal')
   assert.ok(/<style[^>]*>[\s\S]*?\.refusal\s*\{/.test(src), '.refusal 无样式定义')
   assert.ok(src.includes('var(--warning-bg)'), '策略拒绝应用 warning 语义色（不是 failed）')
+})
+
+// ===========================================================================
+// 九、运行时参数声明（ui-12 §5.3 / N-26）
+// ===========================================================================
+
+check('sanitizeParamDecls：空 name 丢弃、同名去重（后者胜）', () => {
+  const out = sanitizeParamDecls([
+    { name: '', type: 'string' },
+    { name: 'A', type: 'string', default: '1' },
+    { name: 'A', type: 'string', default: '2' },
+    { name: '  B  ', type: 'string' },
+  ])
+  assert.deepEqual(
+    out.map((d) => `${d.name}=${d.default ?? ''}`),
+    ['A=2', 'B='],
+  )
+})
+
+check('sanitizeParamDecls：choice 无枚举归位 string、options 逐项 trim 丢空', () => {
+  const noOpts = sanitizeParamDecls([{ name: 'X', type: 'choice', options: [] }])
+  assert.equal(noOpts[0].type, 'string')
+  assert.equal(noOpts[0].options, undefined)
+  const ok = sanitizeParamDecls([{ name: 'E', type: 'choice', options: [' dev ', '', 'prod'] }])
+  assert.equal(ok[0].type, 'choice')
+  assert.deepEqual(ok[0].options, ['dev', 'prod'])
+})
+
+check('sanitizeParamDecls：boolean 默认值只认 true/false；非法值清空', () => {
+  const out = sanitizeParamDecls([
+    { name: 'F1', type: 'boolean', default: 'abc' },
+    { name: 'F2', type: 'boolean', default: 'true' },
+  ])
+  assert.equal(out[0].default, undefined)
+  assert.equal(out[1].default, 'true')
+})
+
+check('sanitizeParamDecls：description/required 只在非空时携带', () => {
+  const out = sanitizeParamDecls([{ name: 'V', type: 'number', description: '  版本  ', required: true }])
+  assert.equal(out[0].description, '版本')
+  assert.equal(out[0].required, true)
+  const plain = sanitizeParamDecls([{ name: 'W', type: 'number' }])
+  assert.equal(plain[0].description, undefined)
+  assert.equal(plain[0].required, undefined)
+})
+
+check('buildDeclaredRunParams：空值不发送（走服务端解析链）、必填缺失上报', () => {
+  const decls = [
+    { name: 'VERSION', type: 'string', required: true, default: '' },
+    { name: 'ENV', type: 'choice', options: ['dev', 'prod'], default: 'dev' },
+    { name: 'OPT', type: 'string' },
+  ]
+  const { params, missing } = buildDeclaredRunParams(decls, { ENV: '' })
+  assert.deepEqual(missing, ['VERSION'])
+  // ENV 空表单值 → 不发送（默认值归服务端解析链），OPT 未声明值也不发送
+  assert.deepEqual(params, [])
+})
+
+check('buildDeclaredRunParams：表单值优先于声明默认值；boolean 归一', () => {
+  const decls = [
+    { name: 'ENV', type: 'choice', options: ['dev', 'prod'], default: 'dev' },
+    { name: 'DRY', type: 'boolean', default: 'false' },
+  ]
+  const { params, missing } = buildDeclaredRunParams(decls, { ENV: 'prod', DRY: 'true' })
+  assert.deepEqual(params, [
+    { name: 'ENV', value: 'prod' },
+    { name: 'DRY', value: 'true' },
+  ])
+  assert.deepEqual(missing, [])
+})
+
+check('编辑器：声明 UI 已接「编辑信息」弹窗并随 [保存] 落库', () => {
+  const src = read('../src/views/PipelineEditorView.vue')
+  assert.ok(src.includes('sanitizeParamDecls'), '保存路径未走 sanitizeParamDecls 归一')
+  assert.ok(src.includes('运行参数声明'), '编辑信息弹窗缺少声明编辑区')
+  assert.ok(src.includes('params: sanitizeParamDecls'), 'PUT /pipelines/:id 未携带 params')
+})
+
+check('触发对话框：按声明渲染表单 + 必填缺失就地阻断', () => {
+  const src = read('../src/components/TriggerRunDialog.vue')
+  assert.ok(src.includes('pipelineApi.get'), '打开时未拉取流水线声明')
+  assert.ok(src.includes('buildDeclaredRunParams'), '触发未走声明参数归并')
+  assert.ok(src.includes('必填参数未填写'), '必填缺失未就地阻断')
+  assert.ok(src.includes('declNames.value.has'), '自由注入行未与声明去重')
 })
 
 console.log(cases.join('\n'))

@@ -7,7 +7,8 @@ export interface RolloutRun {
   id: string
   taskRunId: string
   workloadRef: string
-  phase: string // Progressing | Paused | Healthy | Degraded | RollingBack
+  // runner RolloutPhase 全集（ui-12 §4.5：含终态 Failed / RolledBack）。
+  phase: 'Progressing' | 'Paused' | 'Healthy' | 'Degraded' | 'RollingBack' | 'Failed' | 'RolledBack' | string
   currentStepIndex: number
   currentWeight: number
   stepHistory?: Array<{ at: string; phase: string; weight: number }>

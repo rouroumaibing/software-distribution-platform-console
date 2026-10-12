@@ -27,3 +27,27 @@ export const notificationApi = {
   markRead: (readAt?: string) =>
     http.post('/notifications/read-mark', readAt ? { readAt } : {}).catch(() => undefined),
 }
+
+// ---- §5.2 通知订阅（决策 #5 收敛：本期渠道 = 邮箱） -----------------------
+
+export type SubscriptionEvent = 'approval_required' | 'run_finished' | 'run_failed'
+
+export interface Subscription {
+  subject?: string
+  email: string
+  events: string // 逗号分隔白名单；'' = 默认 approval_required
+  enabled: boolean
+}
+
+export const subscriptionApi = {
+  get: () =>
+    http.get<{ data: Subscription }>('/notifications/subscription').then((r) => r.data.data),
+  update: (sub: Subscription) =>
+    http.put<{ data: Subscription }>('/notifications/subscription', sub).then((r) => r.data.data),
+}
+
+export const SUBSCRIPTION_EVENTS: Array<{ key: SubscriptionEvent; label: string }> = [
+  { key: 'approval_required', label: '待我审批（行动项）' },
+  { key: 'run_finished', label: '运行成功（终态）' },
+  { key: 'run_failed', label: '运行失败 / 取消' },
+]

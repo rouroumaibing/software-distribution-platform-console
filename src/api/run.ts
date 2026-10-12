@@ -2,6 +2,8 @@ import { http } from './http'
 import { listPaged } from './crud'
 import type { Pagination } from './http'
 import type { PipelineTaskType } from './pipeline'
+import { parseSSERawEvent } from '@/utils/agentOp'
+import { useAuthStore } from '@/stores/auth'
 
 export type PipelineRunPhase =
   | 'Pending'
@@ -23,6 +25,8 @@ export interface PipelineRun {
   pipelineVersion: number
   phase: PipelineRunPhase
   triggeredBy?: string
+  // 触发方式（ui-12 §4.3）：manual / cron / webhook / event —— 触发人列旁的结构化来源。
+  triggerSource?: 'manual' | 'cron' | 'webhook' | 'event'
   startTime?: string
   completionTime?: string
   message?: string
@@ -127,8 +131,7 @@ export const runApi = {
       )
       .then((r) => r.data.data),
 
-  // 读取运行/任务日志(G2 端点 GET /runs/:id/log 或 /runs/:id/tasks/:name/log)。
-  // 不传 taskName 读取运行级(__run__)日志。
+  // 读取运行/任务日志(G2 端点 GET /runs/:id/log 或 /runs/:id/tasks/:name/log)。  // 不传 taskName 读取运行级(__run__)日志。
   logs: (runId: string, taskName?: string, p?: Pagination) => {
     const path = taskName
       ? `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskName)}/log`
@@ -138,10 +141,17 @@ export const runApi = {
 
   // Rollout 发布控制(G4 端点 POST /runs/:id/tasks/:name/rollout)。
   // action: pause(暂停在当前权重) | promote(晋升/推进下一步) | rollback(回滚到 0%)。
-  rollout: (runId: string, taskName: string, action: 'pause' | 'promote' | 'rollback') =>
+  // reason/ticket 为高危操作结构化审计上下文（ui-12 §4.4，hub 落 audit_log）。
+  rollout: (
+    runId: string,
+    taskName: string,
+    action: 'pause' | 'promote' | 'rollback',
+    audit?: { reason?: string; ticket?: string },
+  ) =>
     http
       .post<{ data: unknown }>(`/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskName)}/rollout`, {
         action,
+        ...audit,
       })
       .then((r) => r.data.data),
 
@@ -158,4 +168,69 @@ export const runApi = {
         `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskName)}/rerun`,
       )
       .then((r) => r.data.data),
+}
+
+// ---- 运行级日志 SSE（ui-12 §5.5 / N-27）-------------------------------------
+// GET /runs/:id/log/stream：回放历史 + 增量轮询，run 终态后端发 end 关闭。
+// EventSource 无法带 Authorization 头，与 agentOp 同一手法：fetch 流式读取 +
+// 手动解析（parseSSERawEvent 纯函数复用自 utils/agentOp.ts）。
+
+export interface RunLogStreamHandlers {
+  onLog?: (chunk: TaskRunLog) => void
+  onEnd?: () => void
+  onError?: (err: unknown) => void
+}
+
+/** 订阅一个运行的日志流。返回 AbortController 供组件卸载取消。 */
+export function streamRunLogs(runId: string, handlers: RunLogStreamHandlers): AbortController {
+  const ctrl = new AbortController()
+  const token = useAuthStore().accessToken
+  const base = (http.defaults.baseURL || '/api/v1').replace(/\/$/, '')
+  const url = `${base}/runs/${encodeURIComponent(runId)}/log/stream`
+
+  void (async () => {
+    try {
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        signal: ctrl.signal,
+      })
+      if (!res.ok || !res.body) {
+        handlers.onError?.(new Error(`stream http ${res.status}`))
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let sep: number
+        while ((sep = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, sep)
+          buffer = buffer.slice(sep + 2)
+          const parsed = parseSSERawEvent(block)
+          if (!parsed) continue
+          if (parsed.event === 'end') {
+            handlers.onEnd?.()
+            return
+          }
+          if (parsed.event === 'log') {
+            try {
+              const chunk = JSON.parse(parsed.data) as TaskRunLog
+              handlers.onLog?.(chunk)
+            } catch {
+              // 坏块跳过，流保持
+            }
+          }
+        }
+      }
+      handlers.onEnd?.()
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return
+      handlers.onError?.(err)
+    }
+  })()
+
+  return ctrl
 }

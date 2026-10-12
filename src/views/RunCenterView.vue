@@ -20,6 +20,7 @@ import { useRoute, useRouter } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 import { runApi, type PipelineRun } from '@/api/run'
+import { approvalApi, parseAssignees, type CenterApproval, type CenterView } from '@/api/approval'
 import {
   buildResourceIndex,
   emptyResourceIndex,
@@ -150,6 +151,16 @@ async function load() {
     if (t !== token) return
     index.value = idx
 
+    if (view.value === 'approvals') {
+      // 审批中心（ui-12 §5.1）：GET /approvals 三视图，主体=登录态由后端解析。
+      const items = await approvalApi.center(approvalSubView.value).catch(() => [])
+      if (t !== token) return
+      approvalRows.value = items
+      total.value = items.length
+      truncated.value = false
+      return
+    }
+
     if (view.value === 'releases') {
       // 发布 = kind==='release' 的流水线的运行。hub 的 GET /runs 只能按 phase /
       // createdAfter 过滤，按 kind 过滤只能前端做 —— 所以这里扫描一屏运行再筛
@@ -192,6 +203,32 @@ async function load() {
 
 // ---- 展示辅助 ----
 const ref_ = (r: PipelineRun) => index.value.byPipelineId.get(r.pipelineId)
+
+// 审批中心子视图（待我审批/我发起的/已处理）。组件自持不进 URL：
+// 三张子表同源同权，深链进审批中心默认「待我审批」即可定位工作。
+const approvalSubView = ref<CenterView>('pending')
+const approvalRows = ref<CenterApproval[]>([])
+const APPROVAL_SUB_TABS: { key: CenterView; label: string }[] = [
+  { key: 'pending', label: '待我审批' },
+  { key: 'initiated', label: '我发起的' },
+  { key: 'decided', label: '已处理' },
+]
+
+function switchApprovalSub(k: CenterView) {
+  approvalSubView.value = k
+  void load()
+}
+
+const approvalStatusText: Record<string, string> = {
+  Pending: '待审批',
+  Approved: '已通过',
+  Rejected: '已驳回',
+  Cancelled: '已取消',
+}
+
+function approvalRunRoute(a: CenterApproval): string | undefined {
+  return a.pipelineId ? `/pipelines/${a.pipelineId}/runs/${a.runId}` : undefined
+}
 
 function fmtDuration(r: PipelineRun) {
   if (!r.startTime) return '—'
@@ -236,7 +273,7 @@ function openComponent(componentId: string) {
       >{{ v.label }}</div>
     </div>
 
-    <div class="toolbar" style="margin-top: 0">
+    <div v-if="view !== 'approvals'" class="toolbar" style="margin-top: 0">
       <button
         v-for="f in filters"
         :key="f.value"
@@ -274,6 +311,39 @@ function openComponent(componentId: string) {
 
     <div class="card flush">
       <div v-if="loading" class="loading">加载中…</div>
+
+      <!-- 审批中心（ui-12 §5.1）：三子视图；决策动作在运行详情（含自审门 + 评论）。 -->
+      <template v-else-if="view === 'approvals'">
+        <div class="toolbar" style="margin: 8px 12px 0">
+          <button
+            v-for="t in APPROVAL_SUB_TABS"
+            :key="t.key"
+            class="btn btn-sm"
+            :class="approvalSubView === t.key ? 'btn-dark' : 'btn-pearl'"
+            @click="switchApprovalSub(t.key)"
+          >{{ t.label }}</button>
+        </div>
+        <div v-if="approvalRows.length === 0" class="empty">
+          {{ approvalSubView === 'pending' ? '没有等待你决策的审批' : approvalSubView === 'initiated' ? '你尚未发起过需审批的运行' : '你尚未处理过审批' }}
+        </div>
+        <table v-else class="table">
+          <thead><tr><th>运行</th><th>发起人</th><th>待决人</th><th>状态</th><th>发起时间</th><th>决策时间</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="a in approvalRows" :key="a.id">
+              <td class="mono">{{ a.runId.slice(0, 8) }}</td>
+              <td>{{ a.requestedBy || '—' }}</td>
+              <td>{{ parseAssignees(a.assignee).join('、') || '任意审批人' }}</td>
+              <td>{{ approvalStatusText[a.status] ?? a.status }}</td>
+              <td class="mono">{{ fmtTime(a.createdAt) }}</td>
+              <td class="mono">{{ fmtTime(a.decidedAt) }}</td>
+              <td>
+                <router-link v-if="approvalRunRoute(a)" class="link-btn" :to="approvalRunRoute(a)!">去处理 →</router-link>
+                <span v-else class="sub">（旧数据缺 pipelineId）</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
 
       <!-- 发布视图 -->
       <div v-else-if="view === 'releases' && runRows.length === 0" class="empty">暂无发布记录（kind=release 的流水线运行）</div>

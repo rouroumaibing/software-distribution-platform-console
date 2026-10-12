@@ -1,7 +1,11 @@
 import { http } from './http'
 import { createCrud, listPaged } from './crud'
 import type { Pagination } from './http'
-import type { DerivedTaskType, StageExecutionMode } from '@/utils/pipeline'
+import type { DerivedTaskType, ParamDecl, StageExecutionMode } from '@/utils/pipeline'
+
+// 运行时参数声明类型在 utils/pipeline.ts（零 import 纯逻辑层），此处只再导出，
+// 保持「api 层是对 hub JSON 的镜像」这一既有布局。
+export type { ParamDecl }
 
 // 三态任务模型（与 hub PipelineTaskTemplate / runnerapi.PipelineTaskType 对齐）。
 // Build=命令型(构建/测试) · Release=声明式施加软件单元(chart/manifest) · Approval=人工卡点。
@@ -18,6 +22,9 @@ export interface Pipeline {
   kind: 'build' | 'release' | 'custom'
   description?: string
   version: number
+  // 运行时参数声明（ui-12 §5.3）：hub pipelines.params（[]ParamDecl JSON），
+  // 驱动触发弹窗表单；编辑器在「编辑信息」弹窗维护，PUT /pipelines/:id 一并落库。
+  params?: ParamDecl[]
   createdAt: string
   updatedAt: string
 }

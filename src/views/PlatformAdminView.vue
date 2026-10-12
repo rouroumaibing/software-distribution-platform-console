@@ -12,7 +12,123 @@ import { permissionApi, type ComponentRole, type PlatformRole, type PlatformRole
 import { targetApi, type Target } from '@/api/target'
 import { credentialApi, type KubeParseResult } from '@/api/credential'
 import { auditApi, type AuditLog, type AuditLogFilter } from '@/api/audit'
+import { platformApi, type ChangeWindow } from '@/api/platform'
+import { agentOpApi, agentOpStatusLabel, agentOpTypeLabel, type AgentOp } from '@/api/agentOp'
+import { http } from '@/api/http'
 import { toast } from '@/utils/toast'
+
+// ---- §6.3 平台运维聚合（只读） --------------------------------------------
+interface RunnerAgg {
+  name: string
+  status: string
+  agentVersion?: string
+  lastHeartbeatAt?: string
+  online: boolean
+  runs30d?: number
+  runsTotal?: number
+}
+const opsRunners = ref<RunnerAgg[]>([])
+const opsOnline = ref(0)
+const opsHealth = ref('')
+
+async function loadOps() {
+  try {
+    const [runners, quota, health] = await Promise.all([
+      http.get<{ data: { items: RunnerAgg[]; online: number } }>('/ops/runners').then((r) => r.data.data),
+      http.get<{ data: { items: Array<{ targetName: string; runs30d: number; runsTotal: number }> } }>('/ops/quota').then((r) => r.data.data).catch(() => ({ items: [] })),
+      http.get<{ data: { status: string } }>('/ops/health').then((r) => r.data.data).catch(() => ({ status: 'unknown' })),
+    ])
+    const q = new Map(quota.items.map((q) => [q.targetName, q]))
+    opsRunners.value = runners.items.map((r) => ({ ...r, ...(q.get(r.name) ?? {}) }))
+    opsOnline.value = runners.online
+    opsHealth.value = health.status
+  } catch {
+    /* 运维聚合失败不打断接入管理页 */
+  }
+}
+
+// ---- B4 平台自升级审批流（升级审批 Tab） -----------------------------------
+const pendingUpgrades = ref<AgentOp[]>([])
+const upgradeLoading = ref(false)
+const actingOpId = ref('')
+
+async function loadUpgradeApprovals() {
+  upgradeLoading.value = true
+  try {
+    // 平台级台账按状态过滤：只拉待审批的升级 op（跨全部目标）。
+    const p = await agentOpApi.list('pending_approval')
+    pendingUpgrades.value = p.items
+  } catch {
+    /* 无审批权限或端点缺失：留空，不阻断页面 */
+  } finally {
+    upgradeLoading.value = false
+  }
+}
+
+async function approveUpgrade(op: AgentOp) {
+  actingOpId.value = op.id
+  try {
+    await agentOpApi.approve(op.id)
+    toast.ok('已批准升级，开始派发到目标 Runner')
+    await loadUpgradeApprovals()
+  } catch (e) {
+    toast.err('批准失败：' + failMsg(e))
+  } finally {
+    actingOpId.value = ''
+  }
+}
+
+async function rejectUpgrade(op: AgentOp) {
+  const reason = window.prompt('驳回理由（可选）：')
+  if (reason === null) return // 取消
+  actingOpId.value = op.id
+  try {
+    await agentOpApi.reject(op.id, reason || undefined)
+    toast.ok('已驳回升级')
+    await loadUpgradeApprovals()
+  } catch (e) {
+    toast.err('驳回失败：' + failMsg(e))
+  } finally {
+    actingOpId.value = ''
+  }
+}
+
+// ---- §5.1 变更窗口（平台设置 Tab） ----------------------------------------
+const WEEKDAY_OPTS = [
+  { value: 1, label: '一' }, { value: 2, label: '二' }, { value: 3, label: '三' },
+  { value: 4, label: '四' }, { value: 5, label: '五' }, { value: 6, label: '六' },
+  { value: 0, label: '日' },
+] as const
+const changeWindow = reactive<ChangeWindow>({ enabled: false, start: '09:00', end: '18:00', weekdays: [] })
+const cwSaving = ref(false)
+
+async function loadChangeWindow() {
+  try {
+    const cw = await platformApi.getChangeWindow()
+    changeWindow.enabled = cw.enabled
+    changeWindow.start = cw.start || '09:00'
+    changeWindow.end = cw.end || '18:00'
+    changeWindow.weekdays = cw.weekdays ?? []
+  } catch {
+    // 旧 hub 无端点 → 保持默认关闭档
+  }
+}
+
+async function saveChangeWindow() {
+  cwSaving.value = true
+  try {
+    const saved = await platformApi.updateChangeWindow({
+      enabled: changeWindow.enabled,
+      start: changeWindow.start,
+      end: changeWindow.end,
+      weekdays: changeWindow.weekdays ?? [],
+    })
+    Object.assign(changeWindow, saved, { weekdays: saved.weekdays ?? [] })
+    toast.ok('变更窗口已保存')
+  } finally {
+    cwSaving.value = false
+  }
+}
 import {
   COMPONENT_ROLE_ACTION_GROUPS,
   failMsg,
@@ -25,7 +141,7 @@ import {
   type SubjectType,
 } from '@/utils/permission'
 
-const props = defineProps<{ section: 'permissions' | 'targets' | 'credentials' | 'audit' }>()
+const props = defineProps<{ section: 'permissions' | 'targets' | 'credentials' | 'audit' | 'settings' | 'upgrade-approvals' }>()
 
 const roles = ref<PlatformRole[]>([]) // §7.2 平台角色（C-10，可管理）
 const bindings = ref<PlatformRoleBinding[]>([]) // 平台级绑定（C-10，可管理）
@@ -36,7 +152,8 @@ const loading = ref(true)
 // ---- 审计日志（STATUS #19 消费端）：读取端点 = hub GET /audit-logs ----
 const auditRows = ref<AuditLog[]>([])
 const auditLoading = ref(false)
-const auditFilter = reactive<AuditLogFilter>({ actionPrefix: '', subject: '', limit: 200 })
+// ui-12 §5.4：reason 关键词 / ticket 变更单号筛选（hub 端点 4.4 已支持）。
+const auditFilter = reactive<AuditLogFilter>({ actionPrefix: '', subject: '', reason: '', ticket: '', limit: 200 })
 
 async function loadAuditLogs() {
   auditLoading.value = true
@@ -44,6 +161,8 @@ async function loadAuditLogs() {
     auditRows.value = await auditApi.list({
       actionPrefix: auditFilter.actionPrefix || undefined,
       subject: auditFilter.subject || undefined,
+      reason: auditFilter.reason || undefined,
+      ticket: auditFilter.ticket || undefined,
       limit: auditFilter.limit,
     })
   } finally {
@@ -75,8 +194,13 @@ onMounted(async () => {
     } else if (props.section === 'targets') {
       const c = await targetApi.list({ page: 1, pageSize: 100 })
       targets.value = c.items
+      loadOps()
     } else if (props.section === 'audit') {
       await loadAuditLogs()
+    } else if (props.section === 'settings') {
+      await loadChangeWindow()
+    } else if (props.section === 'upgrade-approvals') {
+      await loadUpgradeApprovals()
     }
     // section === 'credentials' → <CredentialsView/> 自行加载，这里无需取数
   } finally {
@@ -379,9 +503,13 @@ function fmtHeartbeat(s?: string) {
 <template>
   <div>
     <div class="page-head">
-      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : section === 'targets' ? '接入管理' : section === 'audit' ? '平台审计日志' : '凭据管理' }}</h1>
+      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : section === 'targets' ? '接入管理' : section === 'audit' ? '平台审计日志' : section === 'upgrade-approvals' ? '升级审批' : '凭据管理' }}</h1>
       <div class="sub" v-if="section === 'credentials'">
         凭据注册与加密存储：hub 侧 AES-GCM 信封加密，明文不回流 console（仅创建/修改请求携带）。
+      </div>
+      <div class="sub" v-else-if="section === 'upgrade-approvals'">
+        B4 平台自升级审批流：Runner 升级属高危操作，需平台级 <code>ops:manage</code> 角色审批后才能派发；
+        超过 24h 无人审批自动驳回（不静默放行）。
       </div>
       <div class="sub" v-else>
         平台级管理 · 组件级授权在各组件详情的「权限」Tab · 主体按 Keycloak <code>sub</code> /
@@ -394,7 +522,49 @@ function fmtHeartbeat(s?: string) {
       <router-link class="tab" :class="{ active: section === 'targets' }" to="/admin/targets">接入管理</router-link>
       <router-link class="tab" :class="{ active: section === 'credentials' }" to="/admin/credentials">凭据管理</router-link>
       <router-link class="tab" :class="{ active: section === 'audit' }" to="/admin/audit">审计日志</router-link>
+      <router-link class="tab" :class="{ active: section === 'settings' }" to="/admin/settings">平台设置</router-link>
+      <router-link class="tab" :class="{ active: section === 'upgrade-approvals' }" to="/admin/upgrade-approvals">升级审批</router-link>
     </div>
+
+    <!-- §5.1 变更窗口（平台级特性开关）：开启后仅窗口内可触发新运行。
+         前端在触发弹窗预拦截，hub 在 Trigger 入口强校验（409 同形状）。 -->
+    <template v-if="section === 'settings'">
+      <div class="card" style="max-width: 640px">
+        <h2 class="h2" style="margin: 0 0 10px">变更窗口</h2>
+        <p class="muted" style="margin-top: 0">
+          开启后，<strong>只有窗口内的时段允许触发新运行</strong>（所有来源：手动 / 定时 / Webhook / 事件）。
+          触发弹窗会即时预拦截；hub 侧同时强校验，窗口外触发返回 409。
+        </p>
+        <div class="field" style="margin-bottom: 12px">
+          <label class="chk">
+            <input v-model="changeWindow.enabled" type="checkbox" />
+            启用变更窗口管控
+          </label>
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 12px">
+          <div class="field">
+            <label>每日开始</label>
+            <input v-model="changeWindow.start" class="input" type="time" />
+          </div>
+          <div class="field">
+            <label>每日结束</label>
+            <input v-model="changeWindow.end" class="input" type="time" />
+          </div>
+        </div>
+        <div class="field" style="margin-bottom: 14px">
+          <label>允许星期（不选 = 每天）</label>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap">
+            <label v-for="d in WEEKDAY_OPTS" :key="d.value" class="chk">
+              <input v-model="changeWindow.weekdays" type="checkbox" :value="d.value" />
+              {{ d.label }}
+            </label>
+          </div>
+        </div>
+        <button class="btn btn-primary" :disabled="cwSaving" @click="saveChangeWindow">
+          {{ cwSaving ? '保存中…' : '保存变更窗口' }}
+        </button>
+      </div>
+    </template>
 
     <template v-if="section === 'permissions'">
       <!-- 平台角色 -->
@@ -578,6 +748,33 @@ function fmtHeartbeat(s?: string) {
           </tbody>
         </table>
       </div>
+
+      <!-- §6.3 平台运维（只读聚合）：健康 + Runner 在线/版本 + 用量 -->
+      <div class="toolbar" style="margin-top: 18px">
+        <h2 class="h2" style="margin: 0">平台运维</h2>
+        <div class="spacer"></div>
+        <span class="chip" :class="opsHealth === 'healthy' ? 'chip-ok' : 'chip-warn'">
+          平台：{{ opsHealth === 'healthy' ? '健康' : '降级' }}
+        </span>
+        <span class="chip">Runner 在线 {{ opsOnline }}/{{ opsRunners.length }}</span>
+        <button class="btn btn-pearl btn-sm" @click="loadOps">刷新</button>
+      </div>
+      <div class="card flush">
+        <table class="table">
+          <thead><tr><th>目标</th><th>状态</th><th>Agent 版本</th><th>心跳</th><th>近 30 天运行</th><th>累计运行</th></tr></thead>
+          <tbody>
+            <tr v-if="opsRunners.length === 0"><td colspan="6" class="empty">无数据</td></tr>
+            <tr v-for="r in opsRunners" :key="r.name">
+              <td><b>{{ r.name }}</b></td>
+              <td>{{ r.online ? '在线' : '离线' }}</td>
+              <td class="mono">{{ r.agentVersion || '—' }}</td>
+              <td class="mono">{{ fmtHeartbeat(r.lastHeartbeatAt) }}</td>
+              <td>{{ r.runs30d ?? 0 }}</td>
+              <td>{{ r.runsTotal ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
 
     <template v-else-if="section === 'credentials'">
@@ -604,6 +801,22 @@ function fmtHeartbeat(s?: string) {
           placeholder="主体（sub 或 /组路径）"
           @keyup.enter="loadAuditLogs"
         />
+        <input
+          v-model="auditFilter.reason"
+          class="input"
+          style="max-width: 200px"
+          type="text"
+          placeholder="原因关键词…"
+          @keyup.enter="loadAuditLogs"
+        />
+        <input
+          v-model="auditFilter.ticket"
+          class="input"
+          style="max-width: 160px"
+          type="text"
+          placeholder="变更单号…"
+          @keyup.enter="loadAuditLogs"
+        />
         <button class="btn btn-primary btn-sm" @click="loadAuditLogs">查询</button>
         <div class="spacer"></div>
         <span class="muted">共 {{ auditRows.length }} 条（最新优先，默认近 200 条）</span>
@@ -620,6 +833,7 @@ function fmtHeartbeat(s?: string) {
               <th>资源</th>
               <th>结果</th>
               <th>来源 IP</th>
+              <th>原因 / 单号</th>
               <th>详情</th>
             </tr>
           </thead>
@@ -644,6 +858,13 @@ function fmtHeartbeat(s?: string) {
                 </span>
               </td>
               <td class="mono">{{ a.sourceIP || '—' }}</td>
+              <td class="muted" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+                <template v-if="a.reason || a.ticket">
+                  <span v-if="a.reason">{{ a.reason }}</span>
+                  <span v-if="a.ticket" class="mono" style="display: block">{{ a.ticket }}</span>
+                </template>
+                <span v-else>—</span>
+              </td>
               <td class="muted" style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
                 {{ a.detail || '—' }}
               </td>
@@ -651,6 +872,47 @@ function fmtHeartbeat(s?: string) {
           </tbody>
         </table>
       </div>
+    </template>
+
+    <!-- B4 平台自升级审批流（升级审批 Tab）：列出所有待审批的升级 op，审批/驳回。 -->
+    <template v-else-if="section === 'upgrade-approvals'">
+      <div class="toolbar" style="margin-top: 0">
+        <h2 class="h2" style="margin: 0">待审批的 Runner 升级</h2>
+        <div class="spacer"></div>
+        <button class="btn btn-pearl btn-sm" :disabled="upgradeLoading" @click="loadUpgradeApprovals">刷新</button>
+      </div>
+      <div class="card flush" style="margin-top: 14px">
+        <div v-if="upgradeLoading" class="loading">加载中…</div>
+        <div v-else-if="pendingUpgrades.length === 0" class="empty">暂无待审批的升级（所有升级已审批 / 驳回）</div>
+        <table v-else class="table">
+          <thead>
+            <tr>
+              <th>目标</th>
+              <th>类型</th>
+              <th>目标版本</th>
+              <th>状态</th>
+              <th>申请时间</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="op in pendingUpgrades" :key="op.id">
+              <td><b>{{ op.targetId.slice(0, 8) }}</b></td>
+              <td><span class="chip">{{ agentOpTypeLabel(op.opType) }}</span></td>
+              <td class="mono">{{ op.detail || '—' }}</td>
+              <td><span class="badge" :class="op.status === 'pending_approval' ? 'b-pend' : ''">{{ agentOpStatusLabel(op.status) }}</span></td>
+              <td class="mono">{{ new Date(op.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</td>
+              <td class="row-actions">
+                <a @click="approveUpgrade(op)" :class="{ disabled: actingOpId === op.id }">批准</a>
+                <a style="color: var(--failed-fg)" @click="rejectUpgrade(op)" :class="{ disabled: actingOpId === op.id }">驳回</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top: 8px">
+        批准即把升级 op 置为可派发并下发给目标 Runner；驳回直接关闭且不派发。超过 24 小时无人处理的待审批项会被定时任务自动驳回。
+      </p>
     </template>
 
     <!-- 平台角色 编辑/新建 -->
@@ -914,6 +1176,10 @@ function fmtHeartbeat(s?: string) {
 .muted {
   color: var(--text-sub);
   font-size: 12px;
+}
+.chk {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 13px; cursor: pointer; white-space: nowrap;
 }
 .toolbar {
   display: flex;

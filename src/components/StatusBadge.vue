@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 4 档状态徽章(CONSOLE-DESIGN §2.2)：Succeeded 绿 / Running 蓝 / Failed 红 / Pending 灰。
+// 状态徽章：运行域六相（§2.2）+ Rollout 域七相（ui-12 §4.5 终态扩展）。
+// 映射到 tokens.css 的 6 态色板；Unknown/空值一律落 Pending 灰。
 import { computed } from 'vue'
 
 const props = defineProps<{ phase?: string }>()
@@ -7,13 +8,21 @@ const props = defineProps<{ phase?: string }>()
 const cls = computed(() => {
   switch (props.phase) {
     case 'Succeeded':
+    case 'Healthy':
       return 'b-succ'
     case 'Running':
+    case 'Progressing':
+    case 'RollingBack':
       return 'b-run'
     case 'Failed':
+    case 'Degraded':
       return 'b-fail'
     case 'WaitingApproval':
+    case 'Paused':
       return 'b-warn'
+    case 'Cancelled':
+    case 'RolledBack':
+      return 'b-pend'
     default:
       return 'b-pend'
   }

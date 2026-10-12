@@ -12,8 +12,33 @@ export interface Component {
   repoSecretRef?: string
   language?: string
   description?: string
+  // §6.1 服务树治理字段
+  tags?: string // 逗号分隔
+  lifecycle?: 'active' | 'frozen' | 'deprecated'
   createdAt: string
   updatedAt: string
+}
+
+// ---- §6.1 依赖图 -----------------------------------------------------------
+
+export interface ComponentDependency {
+  id: string
+  componentId: string
+  dependsOnId: string
+  createdAt: string
+}
+
+export const dependencyApi = {
+  list: (componentId: string, direction: 'upstream' | 'downstream' = 'upstream') =>
+    http
+      .get<{ data: ComponentDependency[] }>(`/components/${componentId}/dependencies`, {
+        params: { direction },
+      })
+      .then((r) => r.data.data),
+  add: (componentId: string, dependsOnId: string) =>
+    http.post(`/components/${componentId}/dependencies`, { dependsOnId }),
+  remove: (componentId: string, dependsOnId: string) =>
+    http.delete(`/components/${componentId}/dependencies`, { data: { dependsOnId } }),
 }
 
 export interface ComponentConfig {

@@ -2,7 +2,7 @@
 // 抽成 utils 是为了让 node 冒烟能直接 import 源码 .ts（与 scripts/*.mjs 同一手法）。
 
 export type AgentOpType = 'exec' | 'install' | 'upgrade'
-export type AgentOpStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+export type AgentOpStatus = 'queued' | 'pending_approval' | 'running' | 'succeeded' | 'failed'
 
 export interface AgentOp {
   id: string
@@ -39,6 +39,7 @@ const OP_TYPE_LABEL: Record<AgentOpType, string> = {
 
 const OP_STATUS_LABEL: Record<AgentOpStatus, string> = {
   queued: '排队中',
+  pending_approval: '待审批',
   running: '运行中',
   succeeded: '成功',
   failed: '失败',

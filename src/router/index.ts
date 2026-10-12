@@ -31,6 +31,10 @@ const router = createRouter({
         { path: '', redirect: '/dashboard' },
         { path: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { title: '总览' } },
         { path: 'service-tree', component: () => import('@/views/ServiceTreeView.vue'), meta: { title: '服务树' } },
+        // §5.2 通知订阅设置（铃铛面板入口；个人级，不进左栏）
+        { path: 'notifications/settings', component: () => import('@/views/NotificationSettingsView.vue'), meta: { title: '通知订阅' } },
+        // §6.4 访问令牌（个人中心入口；个人级）
+        { path: 'me/tokens', component: () => import('@/views/PersonalTokensView.vue'), meta: { title: '访问令牌' } },
 
         // ---- 组件详情（全屏 Tab 化）----
         {
@@ -47,7 +51,9 @@ const router = createRouter({
             { path: 'artifacts', name: 'component-artifacts', component: () => import('@/views/component/tabs/ArtifactsTab.vue'), meta: { title: '组件制品' } },
             { path: 'environments', name: 'component-environments', component: () => import('@/views/component/tabs/EnvironmentsTab.vue'), meta: { title: '组件环境' } },
             { path: 'permissions', name: 'component-permissions', component: () => import('@/views/component/tabs/PermissionsTab.vue'), meta: { title: '组件权限' } },
+            { path: 'audit', name: 'component-audit', component: () => import('@/views/component/tabs/AuditTab.vue'), meta: { title: '组件审计' } },
             { path: 'logs', name: 'component-logs', component: () => import('@/views/component/tabs/LogsTab.vue'), meta: { title: '组件日志' } },
+            { path: 'vars', name: 'component-vars', component: () => import('@/views/component/tabs/VarsTab.vue'), meta: { title: '组件变量与密钥' } },
           ],
         },
 
@@ -66,6 +72,8 @@ const router = createRouter({
         { path: 'admin/targets', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'targets' }, meta: { title: '接入管理' } },
         { path: 'admin/credentials', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'credentials' }, meta: { title: '凭据管理' } },
         { path: 'admin/audit', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'audit' }, meta: { title: '平台审计日志' } },
+        { path: 'admin/settings', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'settings' }, meta: { title: '平台设置' } },
+        { path: 'admin/upgrade-approvals', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'upgrade-approvals' }, meta: { title: '升级审批' } },
 
         // ---- 全局错误态（STATUS #21）----
         // 403：http 响应拦截器（api/http.ts）统一跳转；也可直达 /forbidden。

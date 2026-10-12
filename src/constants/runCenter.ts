@@ -10,7 +10,7 @@
 // 本文件是视图 key、中文名、视图内筛选项的唯一事实源：切换条、面包屑、深链
 // 归一化全部从这里取（附 B 硬约束 ②：面包屑同源，禁止另建 view → 名称映射表）。
 
-export type RunViewKey = 'runs' | 'releases'
+export type RunViewKey = 'runs' | 'releases' | 'approvals'
 
 export interface RunViewFilter {
   /** '' = 全部。取值是 PipelineRunPhase 的真实枚举值，下推 hub GET /runs?phase=。 */
@@ -57,6 +57,14 @@ export const RUN_VIEWS: RunViewDef[] = [
       { value: 'Running', label: '进行中' },
       { value: 'Succeeded', label: '成功' },
     ],
+  },
+  {
+    key: 'approvals',
+    label: '审批',
+    // 审批中心（ui-12 §5.1）：数据源是 GET /approvals 三视图（待我审批/
+    // 我发起的/已处理）。视图内部的子切换由组件自持（approvalSubView），
+    // 不借 phase 槽 —— phase 语义是 PipelineRunPhase，混用会污染深链契约。
+    filters: [{ value: '', label: '全部' }],
   },
 ]
 

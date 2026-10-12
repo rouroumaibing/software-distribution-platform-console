@@ -37,7 +37,9 @@ const tabs = [
   { path: 'artifacts', label: '制品' },
   { path: 'environments', label: '环境' },
   { path: 'permissions', label: '权限' },
+  { path: 'audit', label: '审计' },
   { path: 'logs', label: '日志' },
+  { path: 'vars', label: '变量与密钥' },
 ]
 
 const activeTab = computed(() => (route.name as string)?.replace('component-', '') ?? 'overview')

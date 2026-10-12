@@ -16,7 +16,7 @@
 //
 // 创建主干（「树 + 节点添加对话框」模式）：无组织 → 创建组织（自动 1:1 服务树）；
 // 选中组织 → 添加服务；选中服务 → 添加组件。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Modal from '@/components/Modal.vue'
 import { orgApi, type Org } from '@/api/org'
@@ -43,6 +43,32 @@ import {
   type TreeRowLike,
 } from '@/utils/tree'
 import { toast } from '@/utils/toast'
+import { artifactApi, type Artifact } from '@/api/artifact'
+
+// ---- §6.2 第二视图：跨组件制品检索 ----
+const stView = ref<'tree' | 'artifacts'>('tree')
+const af = reactive({ version: '', name: '', type: '', scanStatus: '' })
+const afRows = ref<Artifact[]>([])
+const afLoading = ref(false)
+
+async function loadArtifacts() {
+  afLoading.value = true
+  try {
+    const resp = await artifactApi.search({
+      version: af.version || undefined,
+      name: af.name || undefined,
+      type: af.type || undefined,
+      scanStatus: af.scanStatus || undefined,
+      page: 1,
+      pageSize: 100,
+    })
+    afRows.value = resp.data
+  } catch {
+    afRows.value = []
+  } finally {
+    afLoading.value = false
+  }
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -678,23 +704,68 @@ function rowHint(node: TreeNode): string {
     <div class="page-head">
       <div class="crumb"><b>服务树</b></div>
       <div class="toolbar" style="margin-top: 0">
-        <select class="select" style="width: auto" :value="orgId" @change="onOrgChange">
+        <div class="seg">
+          <button class="seg-btn" :class="{ active: stView === 'tree' }" @click="stView = 'tree'">树</button>
+          <button class="seg-btn" :class="{ active: stView === 'artifacts' }" @click="stView = 'artifacts'">制品库</button>
+        </div>
+        <select v-if="stView === 'tree'" class="select" style="width: auto" :value="orgId" @change="onOrgChange">
           <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
         </select>
-        <button v-if="orgs.length > 0" class="btn btn-pearl btn-sm" @click="orgDialog = true">＋ 创建组织</button>
+        <button v-if="stView === 'tree' && orgs.length > 0" class="btn btn-pearl btn-sm" @click="orgDialog = true">＋ 创建组织</button>
       </div>
     </div>
 
+    <!-- §6.2 第二视图：跨组件制品检索 -->
+    <template v-if="stView === 'artifacts' && orgs.length > 0">
+      <div class="card" style="padding: 14px">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px">
+          <input v-model="af.version" class="input" style="width: 160px" placeholder="版本子串" />
+          <input v-model="af.name" class="input" style="width: 220px" placeholder="storage key 子串" />
+          <select v-model="af.type" class="select" style="width: auto">
+            <option value="">全部类型</option>
+            <option value="image">image</option>
+            <option value="binary">binary</option>
+            <option value="archive">archive</option>
+            <option value="generic">generic</option>
+          </select>
+          <select v-model="af.scanStatus" class="select" style="width: auto">
+            <option value="">全部扫描状态</option>
+            <option value="scanned">已扫描</option>
+            <option value="unscanned">未扫描</option>
+            <option value="scanning">扫描中</option>
+          </select>
+          <button class="btn btn-primary btn-sm" @click="loadArtifacts">检索</button>
+        </div>
+        <div v-if="afLoading" class="loading">检索中…</div>
+        <div v-else-if="afRows.length === 0" class="empty">无匹配制品（或尚未登记）</div>
+        <table v-else class="tbl">
+          <thead>
+            <tr><th>版本</th><th>类型</th><th>存储键</th><th>签名</th><th>漏洞（严/高/中/低）</th><th>登记时间</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in afRows" :key="a.id">
+              <td class="mono">{{ a.version }}</td>
+              <td>{{ a.artifactType }}</td>
+              <td class="mono" style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ a.storageKey }}</td>
+              <td>{{ a.signed ? '已签名' : '未签名' }}</td>
+              <td>{{ a.sevCritical ?? 0 }} / {{ a.sevHigh ?? 0 }} / {{ a.sevMedium ?? 0 }} / {{ a.sevLow ?? 0 }}</td>
+              <td class="mono">{{ new Date(a.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
     <!-- 加载中先别画"还没有组织"：否则用户可能在数据到达前就点「创建第一个组织」，
          随后撞上 slug 唯一冲突。 -->
-    <div v-if="loading && orgs.length === 0" class="card empty" style="padding: 48px 0">加载中…</div>
+    <div v-if="stView === 'tree' && loading && orgs.length === 0" class="card empty" style="padding: 48px 0">加载中…</div>
 
-    <div v-else-if="orgs.length === 0" class="card empty" style="padding: 48px 0">
+    <div v-else-if="stView === 'tree' && orgs.length === 0" class="card empty" style="padding: 48px 0">
       <p style="margin-bottom: 16px">还没有组织。组织是服务树的根，创建后会自动生成 1:1 的服务树。</p>
       <button class="btn btn-primary" @click="orgDialog = true">＋ 创建第一个组织</button>
     </div>
 
-    <div v-else class="md">
+    <div v-else-if="stView === 'tree'" class="md">
       <!-- 树面板：自身滚动（§4.1 独立滚动容器）；搜索时切换为结果面板 -->
       <div class="card tree-panel">
         <input v-model="query" class="input" placeholder="🔍 搜索服务 / 组件 / 流水线（不需要展开树）" />
@@ -946,4 +1017,7 @@ function rowHint(node: TreeNode): string {
   padding: 9px 0; border-bottom: 1px solid var(--sub-hairline); font-size: 13px;
 }
 .kv-list .row span:first-child { color: var(--sub); }
+.st-view-seg, .seg { display: inline-flex; border: 1px solid var(--hairline); border-radius: 8px; overflow: hidden; }
+.seg-btn { border: none; background: transparent; padding: 6px 14px; font-size: 13px; cursor: pointer; color: var(--sub); }
+.seg-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 </style>

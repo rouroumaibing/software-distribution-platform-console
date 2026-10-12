@@ -26,7 +26,9 @@ http.interceptors.request.use((config) => {
 //   ② 已在 /forbidden 时不重复跳（防循环）。
 // 401 不在这里处理：会话过期由 auth store 的 token 刷新/登出流程负责。
 declare module 'axios' {
-  export interface InternalAxiosRequestConfig {
+  // 挂在 AxiosRequestConfig（InternalAxiosRequestConfig 的父接口）上，
+  // 让调用方在请求 config 里直接传 skip403Redirect 而不报 TS2353。
+  export interface AxiosRequestConfig {
     skip403Redirect?: boolean
   }
 }
@@ -44,6 +46,13 @@ http.interceptors.response.use(
     return Promise.reject(error)
   },
 )
+
+// isAxiosStatus 判定「这个 rejection 是不是后端返回的该 HTTP 状态码」。
+// 供 skip403Redirect 豁免口（auditApi.listForComponent 等）在调用方内联
+// 呈现权限态，而不是让拦截器全局跳转。
+export function isAxiosStatus(e: unknown, status: number): boolean {
+  return axios.isAxiosError(e) && e.response?.status === status
+}
 
 // 后端统一响应格式:{ data?, error? } 或分页的 { data: { items, total, page, pageSize } }
 export interface Envelope<T> {

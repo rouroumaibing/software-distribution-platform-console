@@ -5,6 +5,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
+import HighRiskConfirm from '@/components/HighRiskConfirm.vue'
 import { runApi, type PipelineRun, type TaskRun } from '@/api/run'
 import { releaseApi, type RolloutRun } from '@/api/release'
 import { toast } from '@/utils/toast'
@@ -53,9 +54,8 @@ const releaseTasks = computed(() => tasks.value.filter((t) => t.type === 'Releas
 // 席（旧 runner / 尚未上报）时退回任务完成数近似（原有行为）。
 const snapshotWeight = computed(() => {
   if (snapshots.value.length === 0) return undefined
-  const active = snapshots.value.find(
-    (s) => !['Healthy', 'Degraded', 'RollingBack'].includes(s.phase),
-  )
+  const terminal = ['Healthy', 'Degraded', 'RollingBack', 'Failed', 'RolledBack']
+  const active = snapshots.value.find((s) => !terminal.includes(s.phase))
   return (active ?? snapshots.value[0]).currentWeight
 })
 
@@ -72,21 +72,39 @@ const controlTarget = computed(
 
 const ACTION_LABEL: Record<string, string> = { pause: '暂停', promote: '晋升', rollback: '回滚' }
 
-async function control(action: 'pause' | 'promote' | 'rollback') {
+// 高危确认（ui-12 §4.4）：promote/rollback 必须走 HighRiskConfirm（必填原因
+// + 可选工单号，hub 落审计）；pause 非终态改动，保留直接下发。
+const riskOpen = ref(false)
+const riskAction = ref<'promote' | 'rollback'>('promote')
+
+const RISK_DESC: Record<string, string> = {
+  promote: '晋升会把金丝雀推进到下一步权重（生产流量占比上升）。此操作写入审计。',
+  rollback: '回滚会把金丝雀流量回到 0%，该发布不可再晋升（终态 RolledBack）。此操作写入审计。',
+}
+
+function control(action: 'pause' | 'promote' | 'rollback') {
   const task = controlTarget.value
   if (!task) {
     toast.err('没有进行中的发布任务可控制')
     return
   }
-  if (
-    action === 'rollback' &&
-    !window.confirm(`确认回滚「${task.taskName}」？金丝雀流量将回到 0%，且该发布不可再晋升。`)
-  ) {
+  if (action === 'pause') {
+    void doControl(action)
+    return
+  }
+  riskAction.value = action
+  riskOpen.value = true
+}
+
+async function doControl(action: 'pause' | 'promote' | 'rollback', audit?: { reason?: string; ticket?: string }) {
+  const task = controlTarget.value
+  if (!task) {
+    toast.err('没有进行中的发布任务可控制')
     return
   }
   controlling.value = true
   try {
-    await runApi.rollout(runId, task.taskName, action)
+    await runApi.rollout(runId, task.taskName, action, audit)
     toast.ok(`已下发${ACTION_LABEL[action]}指令到 ${task.taskName}`)
     await pollOnce()
   } catch (e) {
@@ -94,6 +112,11 @@ async function control(action: 'pause' | 'promote' | 'rollback') {
   } finally {
     controlling.value = false
   }
+}
+
+function onRiskConfirm(a: { reason: string; ticket: string }) {
+  riskOpen.value = false
+  void doControl(riskAction.value, a)
 }
 
 const steps = computed(() => {
@@ -162,6 +185,15 @@ const steps = computed(() => {
           <span v-else class="sub" style="margin-left: 8px">当前没有进行中的 Release 任务</span>
         </div>
       </div>
+
+      <HighRiskConfirm
+        :open="riskOpen"
+        :title="`${ACTION_LABEL[riskAction]} · ${controlTarget?.taskName ?? ''}`"
+        :description="RISK_DESC[riskAction]"
+        :confirm-label="`确认${ACTION_LABEL[riskAction]}`"
+        @close="riskOpen = false"
+        @confirm="onRiskConfirm"
+      />
 
       <h2 class="h2">发布单元</h2>
       <div class="card flush">

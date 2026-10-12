@@ -37,6 +37,22 @@ export const agentOpApi = {
   upgrade(targetId: string) {
     return http.post<Envelope<AgentOp>>(`/targets/${targetId}/upgrade`).then((r) => r.data.data as AgentOp)
   },
+  // B4 平台自升级审批流：平台级台账（可选 ?status= 过滤，审批中心用 pending_approval）。
+  list(status?: string) {
+    const params = status ? { status } : undefined
+    return http
+      .get<Envelope<PagedData<AgentOp>>>(`/agent-ops`, { params })
+      .then((r) => r.data.data as PagedData<AgentOp>)
+  },
+  // 审批/拒绝（要求平台级 ops:manage；拒绝可带 reason）。
+  approve(id: string) {
+    return http.post<Envelope<{ id: string; status: string }>>(`/agent-ops/${id}/approve`).then((r) => r.data.data)
+  },
+  reject(id: string, reason?: string) {
+    return http
+      .post<Envelope<{ id: string; status: string }>>(`/agent-ops/${id}/reject`, reason ? { reason } : {})
+      .then((r) => r.data.data)
+  },
 }
 
 export interface StreamHandlers {

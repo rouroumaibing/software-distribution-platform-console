@@ -181,6 +181,8 @@ export interface PipelineRequestBody {
   name: string
   kind: string
   description?: string
+  /** 运行时参数声明（ui-12 §5.3）：随 PUT /pipelines/:id 落库，预览序列的元信息调用一并展示。 */
+  params?: ParamDecl[]
   stages: PipelineRequestStage[]
 }
 
@@ -223,7 +225,8 @@ export function expandPipelineCalls(
   stageIds: readonly string[],
 ): string[] {
   const lines: string[] = [
-    `PUT    /api/v1/pipelines/${pipelineId}    （元信息：name / kind / description）`,
+    `PUT    /api/v1/pipelines/${pipelineId}    （元信息：name / kind / description` +
+      (body.params && body.params.length > 0 ? ` + ${body.params.length} 条参数声明）` : `）`),
   ]
   body.stages.forEach((st, i) => {
     const sid = stageIds[i] ?? '<stageId>'
@@ -570,4 +573,91 @@ export function isNoopRollback(target: number, current: number): boolean {
  */
 export function rollbackWarning(target: number): string {
   return `将用 v${target} 的阶段与子任务「替换」当前结构；流水线名称 / 类型 / 描述不受影响。回滚本身会记为一版新的历史，旧版本不会被删除。`
+}
+
+// ---------------------------------------------------------------------------
+// 9. 运行时参数声明（ui-12 §5.3 / N-26）
+// ---------------------------------------------------------------------------
+
+/**
+ * 一条运行时参数声明。与 hub `models.ParamDecl` 的 JSON tag 一字不差：
+ * 触发时 hub 按 `声明默认值 < 变量组 < 组件变量 < run inputs` 解析，
+ * 这里只管「声明什么」与「弹窗表单怎么填」。
+ */
+export type ParamType = 'string' | 'number' | 'boolean' | 'choice'
+
+export interface ParamDecl {
+  name: string
+  type?: ParamType
+  default?: string
+  required?: boolean
+  options?: string[]
+  description?: string
+}
+
+/**
+ * 编辑器草稿 → 可落库的声明列表。规则：
+ *   - 无 name 的行丢弃（半填状态不算改动）；
+ *   - name 去重（后者胜 —— 同名参数只保留一份语义）；
+ *   - type 非法值归位 'string'；choice 无枚举时同样归位（否则触发表单没有可选项）；
+ *   - options 接受逗号分隔草稿，逐项 trim 后丢弃空项；
+ *   - boolean 的 default 归一为 'true' / 'false' / 空。
+ */
+export function sanitizeParamDecls(decls: readonly Partial<ParamDecl>[]): ParamDecl[] {
+  const out: ParamDecl[] = []
+  for (const d of decls) {
+    const name = (d.name ?? '').trim()
+    if (!name) continue
+    // 同名去重取**后者**：用户复制一行改值时，最后填的才是想留的语义。
+    const idx = out.findIndex((x) => x.name === name)
+    if (idx >= 0) out.splice(idx, 1)
+    const rawType = d.type ?? 'string'
+    const options =
+      rawType === 'choice'
+        ? (d.options ?? []).map((o) => (o ?? '').trim()).filter(Boolean)
+        : undefined
+    const type: ParamType =
+      rawType === 'number' || rawType === 'boolean' || (rawType === 'choice' && options && options.length > 0)
+        ? rawType
+        : 'string'
+    let dv = (d.default ?? '').toString().trim()
+    if (type === 'boolean' && dv && dv !== 'true' && dv !== 'false') dv = ''
+    out.push({
+      name,
+      type,
+      ...(dv ? { default: dv } : {}),
+      ...(d.required ? { required: true } : {}),
+      ...(type === 'choice' ? { options } : {}),
+      ...(d.description?.trim() ? { description: d.description.trim() } : {}),
+    })
+  }
+  return out
+}
+
+/**
+ * 触发弹窗的「已声明参数 → run inputs」合并：
+ *   - 每条声明只取**表单值** `values`；声明 default **不**回落进 run inputs ——
+ *     run inputs 在解析链顶层（运行时输入 > 组件变量 > 变量组 > 声明默认值），
+ *     把 default 塞进去会把它拔高到最高优先级、压过变量组/组件变量。
+ *     default 只做表单 placeholder / 下拉首项提示，空值不发送 = 让服务端走完整解析链；
+ *   - 必填且空 → 记入 `missing` 阻断触发；
+ *   - boolean 表单值归一为 'true' / 'false'。
+ * 返回 `{ params, missing }`；调用方把 `params` 拼进触发请求、`missing` 渲染阻断提示。
+ */
+export function buildDeclaredRunParams(
+  decls: readonly ParamDecl[],
+  values: Readonly<Record<string, string>>,
+): { params: Array<{ name: string; value: string }>; missing: string[] } {
+  const params: Array<{ name: string; value: string }> = []
+  const missing: string[] = []
+  for (const d of decls) {
+    let v = (values[d.name] ?? '').toString().trim()
+    if (d.type === 'boolean' && v && v !== 'true' && v !== 'false') v = ''
+    if (!v) {
+      if (d.required) missing.push(d.name)
+      continue
+    }
+    params.push({ name: d.name, value: v })
+  }
+  return { params, missing }
 }
