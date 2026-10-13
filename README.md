@@ -16,7 +16,7 @@
 | `pnpm typecheck` | 仅做 TS / Vue 类型检查（`vue-tsc --noEmit`） |
 | `pnpm preview` | 本地预览生产构建（`vite preview`，服务于 `output/dist`） |
 | `pnpm package` | Vite 生产构建（`vite build`，不带类型检查；与 `build` 的区别：仅产出静态资源） |
-| `pnpm image` | 组件打包：`output/dist` → nginx 运行时镜像 + charts → 交付包 `output/software-distribution-platform-console-<version>.tar.gz`，并尝试推送到本地 registry（`build/console/build.sh`，默认版本 `v0.0.1`，可用 `pnpm image -- <version>` 指定） |
+| `pnpm image` | 组件打包：`output/dist` → nginx 运行时镜像 + charts → 交付包 `output/software-distribution-platform-console-<version>.tar.gz`（默认版本 `v0.0.1`，可用 `pnpm image -- <version>` 指定） |
 | `pnpm clean` | **先停本地开发服务**，再删生成物（`output/`，及历史位置 `dist/ .vite/ coverage/ .run/` 与散落单文件），保留下载依赖 node_modules（`scripts/clean.sh`） |
 | `pnpm clean -- --no-stop` | 同上，但跳过停服务（CI / 无服务场景；也可用 `NO_STOP=1 pnpm clean`） |
 | `pnpm clean:deep` | 删生成物 + 全部下载依赖（`node_modules/ .pnpm-store/`）（`scripts/clean.sh --deep`） |
