@@ -75,6 +75,17 @@ function render_chart_version(){
 function build_console(){
     pushd "${PROJECT_ROOT}" > /dev/null
     echo "== pnpm build ${component} =="
+    # ----- 网络韧性（2026-10-15 ECS 实测加固）-----
+    # pnpm install 一次性并发拉全量依赖，网络抖动时报 "fetch failed"（ETIMEDOUT）整跑报废。
+    # 通过 npm_config_* 环境变量（pnpm 认 npm 约定的环境变量）限并发 + 加重试：
+    #   - 默认值仅在本进程生效，外部同名变量优先，不覆盖用户/机器级配置；
+    #   - registry/镜像源的选择属环境层（见 env 仓 prod-deplyment/centos-stream-9-64bit-env.sh），
+    #     本脚本不钉 registry，保持仓库对非国内环境中立。
+    export npm_config_network_concurrency="${npm_config_network_concurrency:-4}"
+    export npm_config_fetch_retries="${npm_config_fetch_retries:-6}"
+    export npm_config_fetch_retry_mintimeout="${npm_config_fetch_retry_mintimeout:-20000}"
+    export npm_config_fetch_retry_maxtimeout="${npm_config_fetch_retry_maxtimeout:-120000}"
+    export npm_config_fetch_timeout="${npm_config_fetch_timeout:-600000}"
     pnpm install --frozen-lockfile
     pnpm build
     popd > /dev/null
@@ -89,11 +100,64 @@ function build_console(){
     fi
 }
 
+# ---------- 容器运行时自感知分派（docker / containerd-nerdctl 双支持）----------
+# k8s 1.24+ 默认 containerd、节点无 docker：构建与镜像操作按本地可用运行时分派。
+# 默认 nerdctl（containerd 工具）；若环境存在 docker 命令则重赋为 docker；
+# 否则保持 nerdctl；nerdctl 须已在环境中就绪，缺失直接报失败（不做自动安装）。
+SDP_RUNTIME="${SDP_RUNTIME:-nerdctl}"
+
+ensure_nerdctl() {
+    # nerdctl 硬判断：环境中必须已安装 nerdctl + buildkitd，否则直接报失败。
+    # （nerdctl build 依赖 buildkitd，nerdctl 不自带也不自动启动；离线节点请提前装好。）
+    command -v nerdctl >/dev/null 2>&1 || {
+        echo "ERROR: 当前环境无 docker，且未检测到 nerdctl，无法构建镜像。请先安装 nerdctl + buildkitd。" >&2
+        exit 1
+    }
+    command -v buildkitd >/dev/null 2>&1 || {
+        echo "ERROR: 检测到 nerdctl 但缺少 buildkitd（nerdctl build 必需），请先安装 buildkitd。" >&2
+        exit 1
+    }
+    pgrep -x buildkitd >/dev/null 2>&1 || nohup buildkitd --containerd-worker --addr tcp://127.0.0.1:1234 >/var/log/buildkitd.log 2>&1 &
+    export BUILDKIT_HOST=tcp://127.0.0.1:1234
+}
+
+resolve_runtime() {
+    case "${SDP_RUNTIME}" in docker|nerdctl) ;; *) echo "ERROR: SDP_RUNTIME 仅支持 docker|nerdctl" >&2; exit 1 ;; esac
+    if command -v docker >/dev/null 2>&1; then SDP_RUNTIME=docker; return 0; fi
+    ensure_nerdctl
+    nerdctl info >/dev/null 2>&1 || { echo "ERROR: containerd/nerdctl 不可达" >&2; exit 1; }
+}
+
+sdp_build() { local ctx="$1" img="$2"; shift 2
+    case "${SDP_RUNTIME}" in
+        docker)  docker  build  "$@" -t "$img" "$ctx" ;;
+        nerdctl) nerdctl build  "$@" -t "$img" "$ctx" ;;
+    esac; }
+sdp_save() {
+    if [ -n "${2:-}" ]; then
+        case "${SDP_RUNTIME}" in
+            docker)  docker  save -o "$2" "$1" ;;
+            nerdctl) nerdctl save --format docker -o "$2" "$1" ;;
+        esac
+    else
+        case "${SDP_RUNTIME}" in
+            docker)  docker  save "$1" ;;
+            nerdctl) nerdctl save --format docker "$1" ;;
+        esac
+    fi; }
+sdp_inspect() { case "${SDP_RUNTIME}" in docker) docker image inspect "$1" ;; nerdctl) nerdctl image inspect "$1" ;; esac; }
+sdp_pull() { case "${SDP_RUNTIME}" in docker) docker pull "$1" ;; nerdctl) nerdctl pull "$1" ;; esac; }
+sdp_tag() { case "${SDP_RUNTIME}" in docker) docker tag "$1" "$2" ;; nerdctl) nerdctl tag "$1" "$2" ;; esac; }
+sdp_push() { case "${SDP_RUNTIME}" in docker) docker push "$1" ;; nerdctl) nerdctl push "$1" ;; esac; }
+sdp_login() { case "${SDP_RUNTIME}" in docker) docker login "$@" ;; nerdctl) nerdctl login "$@" ;; esac; }
+
+resolve_runtime; echo "== container runtime: ${SDP_RUNTIME} =="
+
 function build_console_docker_image(){
     pushd "${OUTPUTDIR}/images" > /dev/null
-    echo "== docker build ${component}:${version} =="
-    docker build --network host . -t "${component}:${version}"
-    docker save -o "${OUTPUTDIR}/images/${component}-${version}.tar" "${component}:${version}"
+    echo "== build ${component}:${version} (runtime=${SDP_RUNTIME}) =="
+    sdp_build . "${component}:${version}"
+    sdp_save "${component}:${version}" "${OUTPUTDIR}/images/${component}-${version}.tar"
     if [ -f "${OUTPUTDIR}/images/${component}-${version}.tar" ]; then
         echo "${component} build image successfully."
     else
