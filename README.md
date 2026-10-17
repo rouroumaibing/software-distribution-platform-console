@@ -3,7 +3,7 @@
 
 ## 本地开发 / 管理命令
 
-管理命令入口为 `package.json` scripts（pnpm）；服务启停、清理的底层实现见 `scripts/`，`pnpm run` 可查看全部脚本。**本仓自包含：所有命令只依赖仓内脚本（`scripts/*.sh`、`build/console/build.sh`），不依赖仓库外的任何脚本** —— 起服务用 `pnpm start:dev`，产出镜像 / 交付包用 `pnpm image`。
+管理命令入口为 `package.json` scripts（pnpm）；服务启停、清理的底层实现见 `scripts/`，`pnpm run` 可查看全部脚本。**构建与本地管理命令自包含**：构建 / 启停 / 清理 / 打包命令只依赖仓内脚本（`scripts/*.sh`、`build/console/build.sh`），不依赖仓库外的任何脚本 —— 起服务用 `pnpm start:dev`，产出镜像 / 交付包用 `pnpm image`。部署辅助（本地 kind 联调自签证书等）需引用跨仓脚本，属可选、非本仓构建依赖，详见下文 §TLS。
 
 **构建产物统一落在 `output/` 下**（vite 产物 `output/dist`、依赖预构建缓存 `output/.vite`、本地自签证书 `output/certs`、`pnpm image` 的交付产物），清理即一条 `rm -rf output`；仓库根不产生 `dist/`（历史位置由 `pnpm clean` 兜底清理）。
 
@@ -33,6 +33,8 @@
 | `pnpm test:pipeline` | 流水线全生命周期 UI（C-12：列表/编辑器/executionMode/删除 409 reasons） |
 | `pnpm test:service-tree` | 服务树页交互契约 |
 | `pnpm test:platform-perm` | 平台/组件级权限管理 UI（含 `validateSubjectInput` / `failMsg`（409 `reasons` 优先）等 `utils/permission.ts` 纯函数契约） |
+| `pnpm test:agent-op` | agent 操作消费端契约（SSE 解析 / 事件解码 / 枚举标签，见 `scripts/agent-op-smoke.mjs`） |
+| `pnpm test:run-control` | 运行控制相位策略（可取消 / 可重跑判定，见 `scripts/run-control-smoke.mjs`） |
 
 ## 认证（Keycloak 真对接，2026-09-23 起本地 deploy 默认开启）
 
