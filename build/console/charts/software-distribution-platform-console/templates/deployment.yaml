@@ -20,8 +20,11 @@ spec:
         app: {{ .Values.basic.component }}
         version: v1
     spec:
+      # 镜像拉取凭据名留空则不渲染 imagePullSecrets（registry 无鉴权场景）
+      {{- if .Values.image.imagePullSecrets }}
       imagePullSecrets:
         - name: {{ .Values.image.imagePullSecrets }}
+      {{- end }}
       containers:
         - name: console
           image: {{ .Values.image.imageAddr }}

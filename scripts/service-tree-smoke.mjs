@@ -188,7 +188,7 @@ check('服务树页走 N-9 的按组织列服务端点，且不再预拉组件',
   const src = read('../src/views/ServiceTreeView.vue')
   assert.ok(src.includes('catalogApi.listByOrg'), '应使用 GET /orgs/:id/services（附 A N-9）')
   assert.ok(!src.includes('listByServiceTree'), '懒加载路径不该再走"先查树 id 再列服务"的两跳')
-  // 旧实现的指纹：在 load() 里对每个服务各发一次组件列表。它一旦回来，
+  // 回归指纹：检测 load() 是否退化为对每个服务各发一次组件列表。一旦回到该形态，
   // "展开才请求"就退化回"一次拉全树"，而这一点在浏览器里看不出来。
   assert.ok(!/for \(const s of services\.items\)/.test(src), '疑似恢复了一次性拉全树的旧实现')
 })

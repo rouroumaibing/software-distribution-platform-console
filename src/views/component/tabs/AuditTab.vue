@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 组件审计 Tab（ui-12 5.4 组件级审计下沉，2026-10-11 拍板完整版）：
+// 组件审计 Tab（ui-12 5.4 组件级审计下沉）：
 // 组件管理员（component:manage）查看**本组件**的变更留痕。hub 端把审计行
 // 反规范化 component_id，查询被中间件+handler 双保险强制钳到所辖组件。
 // 403（非组件管理员）→ 内联锁态，不跳 Forbidden 页（FIVES-STATES 锁图标态：

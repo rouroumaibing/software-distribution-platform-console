@@ -42,7 +42,7 @@ export interface PipelineStage {
 
 // Release 类型：声明式施加一个软件单元。chart 与 manifest 二选一。
 //
-// ⚠️ G-12 修复（2026-09-26）：本接口会被 hub 原样存进 pipeline_task_templates，
+// ⚠️ G-12：本接口会被 hub 原样存进 pipeline_task_templates，
 // 触发时 `templateToTaskSpec` 直接 json.Unmarshal 进 runner 的 `ReleaseSpec`——
 // 字段名必须与 runnerapi 严格一致，否则触发时报反序列化错误（manifest 裸字符串）
 // 或静默丢字段（repo → repoURL）。此前 console 用 manifest: string +

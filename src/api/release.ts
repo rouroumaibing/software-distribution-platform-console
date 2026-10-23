@@ -1,6 +1,6 @@
 // 制品/发布视图消费端：GET /releases（ReleaseHandler）。
 // 灰度回流（RUNNER-REFLUX-SPEC §3）落地后，release 行的 currentWeight 是
-// runner 上报的真实灰度快照（hub 落 rollout_runs），不再是任务完成数近似。
+// runner 上报的真实灰度快照（hub 落 rollout_runs），进度口径以真实快照为准。
 import { http, type Envelope, type PagedData } from './http'
 
 export interface RolloutRun {

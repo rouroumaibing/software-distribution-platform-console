@@ -9,7 +9,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import Modal from '@/components/Modal.vue'
 import CredentialsView from '@/views/CredentialsView.vue'
 import { permissionApi, type ComponentRole, type PlatformRole, type PlatformRoleBinding } from '@/api/permission'
-import { targetApi, type Target } from '@/api/target'
+import { targetApi, type Target, type JoinBundle } from '@/api/target'
+import { buildJoinCommand, copyText } from '@/utils/runnerInstall'
 import { credentialApi, type KubeParseResult } from '@/api/credential'
 import { auditApi, type AuditLog, type AuditLogFilter } from '@/api/audit'
 import { platformApi, type ChangeWindow } from '@/api/platform'
@@ -498,6 +499,48 @@ function fmtHeartbeat(s?: string) {
   if (sec < 3600) return `${Math.floor(sec / 60)}m 前`
   return `${Math.floor(sec / 3600)}h 前`
 }
+
+// ---------------------------------------------------------------------------
+// Runner 安装命令（ADR-0002）：行内「安装命令」→ POST /targets/:id/join-bundle
+// 取对接信息（URL / CA / 指纹 / per-target enrollToken），渲染成目标机自举脚本。
+// 501（hub 未配置 publicUrl / TLS CA）时给明确提示，不出空白弹窗。
+// ---------------------------------------------------------------------------
+const joinModal = ref(false)
+const joinLoading = ref(false)
+const joinBundle = ref<JoinBundle | null>(null)
+const joinErr = ref('')
+const joinCopied = ref('')
+
+const joinCmd = computed(() => (joinBundle.value ? buildJoinCommand(joinBundle.value) : null))
+const joinFullScript = computed(() =>
+  joinCmd.value ? [joinCmd.value.caScript, '', joinCmd.value.envFile].join('\n') : '',
+)
+
+async function openJoinBundle(c: Target) {
+  joinBundle.value = null
+  joinErr.value = ''
+  joinCopied.value = ''
+  joinModal.value = true
+  joinLoading.value = true
+  try {
+    joinBundle.value = await targetApi.joinBundle(c.id)
+  } catch (e) {
+    const st = (e as { response?: { status?: number } })?.response?.status
+    joinErr.value =
+      st === 501
+        ? 'hub 未配置对外地址（publicUrl）或 TLS CA，无法生成安装命令（ADR-0002）'
+        : failMsg(e)
+  } finally {
+    joinLoading.value = false
+  }
+}
+
+async function copyJoin(part: 'script' | 'env') {
+  const text = part === 'script' ? joinFullScript.value : (joinCmd.value?.envFile ?? '')
+  if (!text) return
+  if (await copyText(text)) joinCopied.value = part
+  else toast.err('复制失败，请手动选择文本复制')
+}
 </script>
 
 <template>
@@ -742,6 +785,7 @@ function fmtHeartbeat(s?: string) {
               <td class="mono">{{ c.agentVersion || '—' }}</td>
               <td class="mono">{{ fmtHeartbeat(c.lastHeartbeatAt) }}</td>
               <td class="row-actions">
+                <a href="javascript:void(0)" @click="openJoinBundle(c)">安装命令</a>
                 <router-link :to="`/admin/targets/${c.id}/agent-ops`">操作记录</router-link>
               </td>
             </tr>
@@ -1107,6 +1151,41 @@ function fmtHeartbeat(s?: string) {
           </button>
         </template>
         <button v-else class="btn btn-primary" @click="targetModal = false">完成</button>
+      </template>
+    </Modal>
+
+    <!-- Runner 安装命令（ADR-0002 join-bundle）：目标机自举脚本 + 复制 -->
+    <Modal :open="joinModal" :title="`Runner 安装命令 — ${joinBundle?.targetName ?? ''}`" :width="720" @close="joinModal = false">
+      <div v-if="joinLoading" class="loading">生成中…</div>
+      <div v-else-if="joinErr" class="empty">{{ joinErr }}</div>
+      <template v-else-if="joinBundle && joinCmd">
+        <p class="hint">
+          网关 <code class="mono">{{ joinBundle.gatewayUrl }}</code>
+          · CA 指纹 <code class="mono">{{ joinBundle.caFingerprint }}</code>
+          · enroll token {{ joinBundle.expiresIn }} 内有效（per-target 一次性）
+        </p>
+        <div class="field">
+          <label>
+            自举脚本（目标机上以 root 执行：落盘 CA + 指纹自校验 + 环境文件）
+            <button class="btn btn-pearl btn-sm" style="margin-left: 8px" @click="copyJoin('script')">
+              {{ joinCopied === 'script' ? '✓ 已复制' : '复制脚本' }}
+            </button>
+          </label>
+          <pre class="enroll-token mono">{{ joinFullScript }}</pre>
+        </div>
+        <div class="field">
+          <label>
+            环境文件（/etc/sdp-runner/sdp-runner.env，装机管线可拆出单独消费）
+            <button class="btn btn-pearl btn-sm" style="margin-left: 8px" @click="copyJoin('env')">
+              {{ joinCopied === 'env' ? '✓ 已复制' : '复制 env' }}
+            </button>
+          </label>
+          <pre class="enroll-token mono">{{ joinCmd.envFile }}</pre>
+        </div>
+        <p class="hint">{{ joinCmd.verifyCommand }}；unattended 场景把本弹窗脚本内嵌进 cloud-init userdata（ADR-0002 §2）。</p>
+      </template>
+      <template #foot>
+        <button class="btn btn-primary" @click="joinModal = false">关闭</button>
       </template>
     </Modal>
   </div>

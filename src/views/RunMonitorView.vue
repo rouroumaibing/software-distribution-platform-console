@@ -81,7 +81,7 @@ async function loadLogs() {
   if (!run.value) return
   const taskName = selected.value?.taskName ?? '__run__'
   const key = `${runId}::${taskName}`
-  // 运行已结束且已加载过该 (run, task) 的日志则不再重复拉取。
+  // 运行已结束且日志已加载过的 (run, task) 跳过重复拉取。
   if (key === logKey.value && !isActive.value) return
   logLoading.value = true
   try {
