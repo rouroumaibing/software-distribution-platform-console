@@ -1,14 +1,22 @@
 <script setup lang="ts">
-// 平台管理（IA v2）：用户与平台权限（平台级 RBAC，C-10 端点）/ 接入管理 / 凭据管理。
-// 组件级授权在各组件详情的「权限」Tab —— 权限双轨的平台侧半边。
+// 平台管理（IA v2）：用户与平台权限（M1 用户/组管理 + 平台级 RBAC，C-10 端点）/
+// 接入管理 / 凭据管理。组件级授权在各组件详情的「权限」Tab —— 权限双轨的平台侧半边。
 //
-// hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2），所以本页**没有用户目录**，
-// 也不调 `GET /users`（hub 无该端点）。主体暴露方式按决策文档 §3.5 第 4 条
-// 的 (b′)：下拉候选 = 绑定表里去重出的「已绑定主体」，新主体靠**手输** `sub` / 组路径。
+// hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2）：用户/组目录经 hub 代理
+// Keycloak Admin REST（directoryApi，N-34），M1 管理区与授权表单候选均来自目录；
+// 目录不可用（KC 未配置）时整块隐藏、表单退化「已绑定主体 + 手输 sub / 组路径」。
 import { computed, onMounted, reactive, ref } from 'vue'
 import Modal from '@/components/Modal.vue'
 import CredentialsView from '@/views/CredentialsView.vue'
-import { permissionApi, type ComponentRole, type PlatformRole, type PlatformRoleBinding } from '@/api/permission'
+import {
+  directoryApi,
+  permissionApi,
+  type ComponentRole,
+  type KCGroup,
+  type KCUser,
+  type PlatformRole,
+  type PlatformRoleBinding,
+} from '@/api/permission'
 import { targetApi, type Target, type JoinBundle } from '@/api/target'
 import { buildJoinCommand, copyText } from '@/utils/runnerInstall'
 import { credentialApi, type KubeParseResult } from '@/api/credential'
@@ -191,7 +199,7 @@ async function loadComponentRoles() {
 onMounted(async () => {
   try {
     if (props.section === 'permissions') {
-      await Promise.all([loadRoles(), loadBindings(), loadComponentRoles()])
+      await Promise.all([loadRoles(), loadBindings(), loadComponentRoles(), loadDirectory()])
     } else if (props.section === 'targets') {
       const c = await targetApi.list({ page: 1, pageSize: 100 })
       targets.value = c.items
@@ -352,10 +360,197 @@ const bindForm = reactive({
   expiresAt: '',
 })
 
-// 候选 = 已有平台绑定里的主体（去重、按类型过滤）。只是省事的候选，手输不受限。
-const subjectOptions = computed(() =>
-  knownSubjects(bindings.value).filter((s) => s.subjectType === bindForm.subjectType),
-)
+// ---- 用户/组目录（N-34，经 hub 代理 Keycloak Admin REST）--------------------
+// 授权表单的候选来源：用户 sub（= KC user id）/ 组路径。hub 侧 KC 未配置或
+// 代理不可用时目录为空，表单退化为「已绑定主体 + 手输」（validateSubjectInput
+// 阻塞性校验不变）。
+const dirUsers = ref<KCUser[]>([])
+const dirGroups = ref<KCGroup[]>([])
+// 目录可用性：KC 未配置时代理端点不存在（404）。M1 用户/组管理区整块隐藏，
+// 授权表单退化手输；目录存在但为空（KC 有 realm 无用户）仍展示空表。
+const dirAvailable = ref(false)
+
+async function loadDirectory() {
+  try {
+    const [users, groups] = await Promise.all([directoryApi.users.list(), directoryApi.groups.list()])
+    dirUsers.value = users
+    dirGroups.value = groups
+    dirAvailable.value = true
+  } catch {
+    // 目录代理 404 / 403：静默退化，手输兜底（M2 语义，不弹错）。
+  }
+}
+
+// ---------------------------------------------------------------------------
+// M1 用户与组管理（ui-05 §7.14 M1）：经 hub 代理 Keycloak Admin REST 的账号
+// 生命周期。临时口令（建用户 / 重置密码）由 hub 生成、**响应只返回一次**，
+// requiredActions=[UPDATE_PASSWORD] 首登强制改密 —— 前端不缓存、不二次展示。
+// `/org:<slug>` 组织载体组由 orgsvc 管理，代理只读（hub handler 403 兜底）。
+// ---------------------------------------------------------------------------
+const userModal = ref(false)
+const userSaving = ref(false)
+const userForm = reactive({ username: '', email: '' })
+// 一次性口令展示：关掉就再也看不到（与 enroll-token 同语义）。
+const pwShow = ref<{ title: string; username: string; password: string } | null>(null)
+
+function openCreateUser() {
+  userForm.username = ''
+  userForm.email = ''
+  userModal.value = true
+}
+
+async function saveUser() {
+  if (!userForm.username.trim()) {
+    toast.err('请填写用户名')
+    return
+  }
+  userSaving.value = true
+  try {
+    const created = await directoryApi.users.create({
+      username: userForm.username.trim(),
+      email: userForm.email.trim() || undefined,
+    })
+    userModal.value = false
+    pwShow.value = {
+      title: '用户已创建',
+      username: created?.username ?? userForm.username.trim(),
+      password: created?.temporaryPassword ?? '',
+    }
+    await loadDirectory()
+  } catch (e) {
+    toast.err(failMsg(e))
+  } finally {
+    userSaving.value = false
+  }
+}
+
+async function resetPassword(u: KCUser) {
+  if (!window.confirm(`为用户「${u.username}」重置密码？将生成新的临时口令，旧口令立即失效。`)) return
+  try {
+    const r = await directoryApi.users.resetPassword(u.id)
+    pwShow.value = { title: '密码已重置', username: u.username, password: r?.password ?? '' }
+  } catch (e) {
+    toast.err(failMsg(e))
+  }
+}
+
+async function toggleUser(u: KCUser) {
+  const verb = u.enabled ? '停用' : '启用'
+  if (!window.confirm(`${verb}用户「${u.username}」？`)) return
+  try {
+    await directoryApi.users.update(u.id, { enabled: !u.enabled })
+    toast.ok(`已${verb}`)
+    await loadDirectory()
+  } catch (e) {
+    toast.err(failMsg(e))
+  }
+}
+
+const groupModal = ref(false)
+const groupSaving = ref(false)
+const groupForm = reactive({ name: '' })
+
+function openCreateGroup() {
+  groupForm.name = ''
+  groupModal.value = true
+}
+
+// 与 hub validateRBACGroupName 对齐：名非空、不含 `/`、不得撞组织载体前缀。
+function validateGroupName(name: string): string | null {
+  if (!name.trim()) return '请填写组名'
+  if (name.includes('/')) return '组名不能包含 /（不支持嵌套组）'
+  if (name === 'org' || name.startsWith('org:')) return 'org: 前缀是组织载体组保留名（§2.3）'
+  return null
+}
+
+async function saveGroup() {
+  const invalid = validateGroupName(groupForm.name)
+  if (invalid) {
+    toast.err(invalid)
+    return
+  }
+  groupSaving.value = true
+  try {
+    await directoryApi.groups.create(groupForm.name.trim())
+    toast.ok('已创建用户组')
+    groupModal.value = false
+    await loadDirectory()
+  } catch (e) {
+    toast.err(failMsg(e))
+  } finally {
+    groupSaving.value = false
+  }
+}
+
+// 成员管理弹窗：一个组一个弹窗，成员 = 目录用户子集。
+const membersModal = ref(false)
+const membersLoading = ref(false)
+const membersGroup = ref<KCGroup | null>(null)
+const members = ref<KCUser[]>([])
+const memberToAdd = ref('')
+
+async function openMembers(g: KCGroup) {
+  membersGroup.value = g
+  memberToAdd.value = ''
+  membersModal.value = true
+  membersLoading.value = true
+  try {
+    members.value = await directoryApi.groups.listMembers(g.id)
+  } catch (e) {
+    toast.err(failMsg(e))
+    members.value = []
+  } finally {
+    membersLoading.value = false
+  }
+}
+
+async function addMember() {
+  const g = membersGroup.value
+  if (!g || !memberToAdd.value) {
+    toast.err('请选择要加入的用户')
+    return
+  }
+  try {
+    await directoryApi.groups.addMember(g.id, memberToAdd.value)
+    await openMembers(g)
+    await loadDirectory()
+  } catch (e) {
+    toast.err(failMsg(e))
+  }
+}
+
+async function removeMember(u: KCUser) {
+  const g = membersGroup.value
+  if (!g) return
+  if (!window.confirm(`把「${u.username}」移出「${g.name}」？`)) return
+  try {
+    await directoryApi.groups.removeMember(g.id, u.id)
+    await openMembers(g)
+  } catch (e) {
+    toast.err(failMsg(e))
+  }
+}
+
+async function copyPw() {
+  if (pwShow.value && (await copyText(pwShow.value.password))) toast.ok('已复制到剪贴板')
+}
+
+// 候选 = 目录 ∪ 已绑定主体（去重）。user 候选展示 username（值仍是 sub）。
+const subjectOptions = computed(() => {
+  const known = knownSubjects(bindings.value).filter((s) => s.subjectType === bindForm.subjectType)
+  const merged = new Map<string, string>()
+  if (bindForm.subjectType === 'user') {
+    for (const u of dirUsers.value) merged.set(u.id, u.username)
+  } else {
+    for (const g of dirGroups.value) merged.set(g.path, g.path)
+  }
+  for (const s of known) if (!merged.has(s.subjectId)) merged.set(s.subjectId, s.subjectId)
+  return [...merged].map(([subjectId, label]) => ({
+    subjectType: bindForm.subjectType,
+    subjectId,
+    label,
+  }))
+})
 const subjectHint = computed(() => subjectInputHint(bindForm.subjectType, bindForm.subjectValue))
 // 「已绑定主体」只读清单：这就是「用户与平台权限」页的全部人员可见性。
 const boundSubjects = computed(() => knownSubjects(bindings.value))
@@ -610,6 +805,71 @@ async function copyJoin(part: 'script' | 'env') {
     </template>
 
     <template v-if="section === 'permissions'">
+      <!-- M1 用户（hub 代理 Keycloak Admin REST；KC 未配置时整块隐藏） -->
+      <template v-if="dirAvailable">
+        <div class="toolbar">
+          <h2 class="h2" style="margin: 0">用户</h2>
+          <div class="spacer"></div>
+          <button class="btn btn-pearl" @click="openCreateUser">＋ 新建用户</button>
+        </div>
+        <div class="card flush">
+          <div v-if="dirUsers.length === 0" class="empty">目录中没有用户</div>
+          <table v-else class="table">
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>邮箱</th>
+                <th>状态</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in dirUsers" :key="u.id">
+                <td class="mono" :title="u.id">{{ u.username }}</td>
+                <td>{{ u.email || '—' }}</td>
+                <td>
+                  <span class="badge" :style="u.enabled ? '' : 'background: var(--failed-fg)'">{{ u.enabled ? '启用' : '停用' }}</span>
+                  <span v-if="(u.requiredActions ?? []).includes('UPDATE_PASSWORD')" class="chip" style="margin-left: 6px">待改密</span>
+                </td>
+                <td class="row-actions">
+                  <a @click="resetPassword(u)">重置密码</a>
+                  <a @click="toggleUser(u)">{{ u.enabled ? '停用' : '启用' }}</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- M1 用户组（/org:* 载体组由系统管理，代理只读） -->
+        <div class="toolbar">
+          <h2 class="h2" style="margin: 0">用户组</h2>
+          <div class="spacer"></div>
+          <button class="btn btn-pearl" @click="openCreateGroup">＋ 新建用户组</button>
+        </div>
+        <div class="card flush">
+          <div v-if="dirGroups.length === 0" class="empty">目录中没有用户组</div>
+          <table v-else class="table">
+            <thead>
+              <tr>
+                <th>组名</th>
+                <th>路径</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="g in dirGroups" :key="g.id">
+                <td>{{ g.name }}</td>
+                <td class="mono">{{ g.path }}</td>
+                <td class="row-actions">
+                  <a @click="openMembers(g)">成员</a>
+                  <span v-if="g.path.startsWith('/org:')" class="muted" title="组织载体组由系统自动管理（§2.3），不可在此修改">系统管理</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
       <!-- 平台角色 -->
       <div class="toolbar">
         <h2 class="h2" style="margin: 0">平台角色</h2>
@@ -744,8 +1004,9 @@ async function copyJoin(part: 'script' | 'env') {
         </table>
       </div>
       <p class="muted" style="margin-top: 8px">
-        hub 不保存用户表（规范 §2.2），因此这里只列**已经拥有绑定**的主体。给新人授权时，
-        请在「添加绑定」里直接填入他在 Keycloak 里的 <code>sub</code> —— 不需要他先登录一次。
+        hub 不保存用户表（规范 §2.2）：用户与组来自 Keycloak 目录（经 hub 代理），
+        绑定主体 = 用户 <code>sub</code> / 组路径。目录不可用时在「添加绑定」里手输即可——
+        不需要对方先登录一次。
       </p>
     </template>
 
@@ -959,6 +1220,94 @@ async function copyJoin(part: 'script' | 'env') {
       </p>
     </template>
 
+    <!-- M1 新建用户 -->
+    <Modal :open="userModal" title="新建用户" @close="userModal = false">
+      <div class="field">
+        <label>用户名</label>
+        <input v-model="userForm.username" class="input" type="text" placeholder="如 zhang.san" />
+      </div>
+      <div class="field">
+        <label>邮箱</label>
+        <input v-model="userForm.email" class="input" type="email" placeholder="可选" />
+      </div>
+      <p class="hint">创建成功后展示一次性临时口令，首登强制修改（UPDATE_PASSWORD）；口令只显示这一次。</p>
+      <template #foot>
+        <button class="btn btn-pearl" @click="userModal = false">取消</button>
+        <button class="btn btn-primary" :disabled="userSaving" @click="saveUser">
+          {{ userSaving ? '创建中…' : '创建' }}
+        </button>
+      </template>
+    </Modal>
+
+    <!-- M1 一次性口令展示（关闭即失效可见性；口令本身由用户首登改密） -->
+    <Modal :open="!!pwShow" :title="pwShow?.title ?? ''" @close="pwShow = null">
+      <template v-if="pwShow">
+        <p>
+          用户 <b>{{ pwShow.username }}</b> 的临时口令（仅展示这一次）：
+        </p>
+        <div class="pw-row">
+          <code class="mono">{{ pwShow.password }}</code>
+          <button class="btn btn-pearl" @click="copyPw">复制</button>
+        </div>
+        <p class="hint">请通过带外渠道交付；用户首次登录时会被要求修改密码。</p>
+      </template>
+      <template #foot>
+        <button class="btn btn-primary" @click="pwShow = null">我已保存</button>
+      </template>
+    </Modal>
+
+    <!-- M1 新建用户组 -->
+    <Modal :open="groupModal" title="新建用户组" @close="groupModal = false">
+      <div class="field">
+        <label>组名</label>
+        <input v-model="groupForm.name" class="input" type="text" placeholder="如 sdp-admin / team-deployer" />
+        <p class="hint">不能包含 /（不支持嵌套）；org: 前缀是组织载体组保留名。</p>
+      </div>
+      <template #foot>
+        <button class="btn btn-pearl" @click="groupModal = false">取消</button>
+        <button class="btn btn-primary" :disabled="groupSaving" @click="saveGroup">
+          {{ groupSaving ? '创建中…' : '创建' }}
+        </button>
+      </template>
+    </Modal>
+
+    <!-- M1 组成员管理 -->
+    <Modal :open="membersModal" :title="`成员管理 · ${membersGroup?.name ?? ''}`" @close="membersModal = false">
+      <div class="field">
+        <label>添加成员</label>
+        <div class="pw-row">
+          <select v-model="memberToAdd" class="input">
+            <option value="">选择用户…</option>
+            <option v-for="u in dirUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
+          </select>
+          <button class="btn btn-pearl" @click="addMember">添加</button>
+        </div>
+      </div>
+      <div class="card flush">
+        <div v-if="membersLoading" class="loading">加载中…</div>
+        <div v-else-if="members.length === 0" class="empty">暂无成员</div>
+        <table v-else class="table">
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>邮箱</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in members" :key="u.id">
+              <td class="mono" :title="u.id">{{ u.username }}</td>
+              <td>{{ u.email || '—' }}</td>
+              <td><a style="color: var(--failed-fg)" @click="removeMember(u)">移出</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <template #foot>
+        <button class="btn btn-primary" @click="membersModal = false">完成</button>
+      </template>
+    </Modal>
+
     <!-- 平台角色 编辑/新建 -->
     <Modal :open="roleModal" :title="roleEditId ? '编辑平台角色' : '新建平台角色'" @close="roleModal = false">
       <div class="field">
@@ -1042,10 +1391,10 @@ async function copyJoin(part: 'script' | 'env') {
           placeholder="Keycloak 用户详情里的 sub（uuid），不是用户名"
         />
         <datalist id="platform-subject-options">
-          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId" />
+          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId">{{ s.label }}</option>
         </datalist>
         <p class="hint" v-if="subjectHint">{{ subjectHint }}</p>
-        <p class="hint" v-else>下拉候选是已绑定过的主体；新主体直接粘贴 <code>sub</code> 即可。</p>
+        <p class="hint" v-else>候选来自用户目录与已绑定主体；新主体直接粘贴 <code>sub</code> 即可。</p>
       </div>
       <div class="field" v-else>
         <label>用户组路径</label>
@@ -1057,10 +1406,10 @@ async function copyJoin(part: 'script' | 'env') {
           placeholder="带前导斜杠，如 /sdp-admin"
         />
         <datalist id="platform-subject-options">
-          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId" />
+          <option v-for="s in subjectOptions" :key="s.subjectId" :value="s.subjectId">{{ s.label }}</option>
         </datalist>
         <p class="hint" v-if="subjectHint">{{ subjectHint }}</p>
-        <p class="hint" v-else>组主体须带前导斜杠（本 realm groups mapper 为 full.path）。</p>
+        <p class="hint" v-else>组主体须带前导斜杠（realm groups mapper 为 full.path）；候选来自组目录与已绑定主体，/org:* 为平台托管只读组。</p>
       </div>
 
       <div class="field">
@@ -1286,6 +1635,12 @@ async function copyJoin(part: 'script' | 'env') {
   margin: 8px 0; padding: 10px 12px; background: var(--term-bg); color: var(--term-fg);
   border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
+.pw-row { display: flex; align-items: center; gap: 10px; }
+.pw-row > code {
+  flex: 1; padding: 10px 12px; background: var(--term-bg); color: var(--term-fg);
+  border-radius: 8px; font-size: 13px; letter-spacing: 1px; word-break: break-all;
+}
+.pw-row > select { flex: 1; }
 .row-actions {
   white-space: nowrap;
 }

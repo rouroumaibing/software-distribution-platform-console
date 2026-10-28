@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts'
+import { userinfoApi, type UserInfo } from '@/api/userinfo'
 
 // 配置解析优先级：window.__APP_CONFIG__（容器运行时由 console chart 的
 // templates/config.yaml 渲染 /usr/share/nginx/html/config.js 注入）> import.meta.env（构建期注入，dev 用）。
@@ -44,12 +45,16 @@ const devUser = {
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null as User | null,
+    userinfo: null as UserInfo | null,
     initialized: false,
   }),
 
   getters: {
     isAuthenticated: (state) => !!state.user && !state.user.expired,
     accessToken: (state) => state.user?.access_token ?? null,
+    // 授权相关展示的唯一真相源（hub /api/userinfo）；token 的 realm_access 不读。
+    roles: (state) => state.userinfo?.roles ?? [],
+    orgs: (state) => state.userinfo?.orgs ?? [],
     // 登录说明页（/login-hint）用：预置账号展示值与 Keycloak issuer（空 = 未配置）。
     loginHintUser: () => cfg('VITE_LOGIN_HINT_USER') ?? '',
     loginHintPassword: () => cfg('VITE_LOGIN_HINT_PASSWORD') ?? '',
@@ -57,6 +62,15 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
+    /** 拉取 hub 权限镜像（角色 / 组织）。失败静默降级，不阻断登录态。 */
+    async loadUserinfo() {
+      try {
+        this.userinfo = await userinfoApi.get()
+      } catch {
+        this.userinfo = null
+      }
+    },
+
     /** App 启动时调用一次,尝试从本地存储恢复已登录状态。 */
     async init() {
       if (AUTH_DISABLED) {
@@ -65,6 +79,10 @@ export const useAuthStore = defineStore('auth', {
         this.user = (await userManager?.getUser()) ?? null
       }
       this.initialized = true
+      // 登录态恢复后异步补齐权限镜像；token 缺失（dev / 未登录）时自然降级。
+      if (this.accessToken) {
+        void this.loadUserinfo()
+      }
     },
 
     /** 跳转到 Keycloak 登录页。 */
@@ -83,6 +101,9 @@ export const useAuthStore = defineStore('auth', {
         return
       }
       this.user = (await userManager?.signinRedirectCallback()) ?? null
+      if (this.accessToken) {
+        void this.loadUserinfo()
+      }
     },
 
     async logout() {

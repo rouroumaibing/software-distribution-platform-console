@@ -153,17 +153,17 @@ const userName = computed(() => {
 })
 
 // ---- 个人中心（§7.1 顶栏账户区）：轻量下拉，展示当前会话的身份信息 ----
-// hub 不存用户表，这里能展示的只有 Keycloak token profile 里的字段。
+// 身份四字段（name/username/email/sub）来自 oidc-client-ts 的 profile（OIDC 标准）；
+// 授权相关展示（平台角色）来自 hub /api/userinfo（auth.userinfo），不读 token realm_access。
 const profileOpen = ref(false)
 const profile = computed(() => {
   const p = (auth.user?.profile ?? {}) as Record<string, unknown>
-  const roles = p.realm_access as { roles?: string[] } | undefined
   return {
     name: (p.name as string) || (p.preferred_username as string) || '—',
     username: (p.preferred_username as string) || '—',
     email: (p.email as string) || '—',
     sub: (p.sub as string) || '—',
-    roles: roles?.roles ?? [],
+    roles: auth.roles,
   }
 })
 
@@ -273,7 +273,7 @@ async function logout() {
               <div class="pf-row"><span>邮箱</span><span class="mono">{{ profile.email }}</span></div>
               <div class="pf-row"><span>sub</span><span class="mono pf-sub" :title="profile.sub">{{ profile.sub }}</span></div>
               <div class="pf-roles">
-                <span class="pf-roles-label">Realm 角色</span>
+                <span class="pf-roles-label">平台角色</span>
                 <template v-if="profile.roles.length">
                   <span v-for="r in profile.roles" :key="r" class="chip">{{ r }}</span>
                 </template>

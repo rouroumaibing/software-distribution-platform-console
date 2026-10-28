@@ -2,10 +2,67 @@ import { http } from './http'
 import { createCrud } from './crud'
 import type { Envelope } from './http'
 
-// 注意：这里**没有 User 类型，也没有 /users 端点**。
-// hub 不存用户表（ACCOUNT-PERMISSION-MODEL §2.2 / D3），所以控制台拿不到
-// 「系统里有哪些人」这份目录。授权表单是「下拉已绑定主体 + 手输 sub」，
-// 见 utils/permission.ts 的 knownSubjects / validateSubjectInput。
+// 用户/组目录（N-34）：经 hub 代理 Keycloak Admin REST（/keycloak/users、
+// /keycloak/groups），挂平台级 user:manage。KC 未配置时这些端点不存在，
+// 调用方须容错降级为「手输主体」（utils/permission.ts 的 validateSubjectInput）。
+
+// Keycloak 用户投影。id 即 JWT 的 `sub`（realm 内一致），可直接作绑定主体。
+export interface KCUser {
+  id: string
+  username: string
+  email?: string
+  enabled: boolean
+  requiredActions?: string[]
+}
+
+// Keycloak 组投影。path 带前导斜杠（§5.3），是 group 绑定的 subjectId。
+export interface KCGroup {
+  id: string
+  name: string
+  path: string
+}
+
+export interface CreateUserResult {
+  id: string
+  username: string
+  email?: string
+  temporaryPassword?: string
+  requiredActions?: string[]
+}
+
+export const directoryApi = {
+  users: {
+    list: (search = '') =>
+      http
+        .get<Envelope<KCUser[]>>('/keycloak/users', { params: search ? { search } : {} })
+        .then((r) => r.data.data ?? []),
+    create: (payload: { username: string; email?: string; initialPassword?: string }) =>
+      http
+        .post<Envelope<CreateUserResult>>('/keycloak/users', payload)
+        .then((r) => r.data.data),
+    update: (id: string, payload: { enabled?: boolean; email?: string }) =>
+      http.put(`/keycloak/users/${id}`, payload),
+    resetPassword: (id: string, password?: string) =>
+      http
+        .put<Envelope<{ temporary: boolean; password: string }>>(`/keycloak/users/${id}/password`,
+          password ? { password } : {})
+        .then((r) => r.data.data),
+  },
+  groups: {
+    list: (search = '') =>
+      http
+        .get<Envelope<KCGroup[]>>('/keycloak/groups', { params: search ? { search } : {} })
+        .then((r) => r.data.data ?? []),
+    create: (name: string) =>
+      http.post<Envelope<KCGroup>>('/keycloak/groups', { name }).then((r) => r.data.data),
+    listMembers: (id: string) =>
+      http.get<Envelope<KCUser[]>>(`/keycloak/groups/${id}/members`).then((r) => r.data.data ?? []),
+    addMember: (id: string, userId: string) =>
+      http.put(`/keycloak/groups/${id}/members/${userId}`),
+    removeMember: (id: string, userId: string) =>
+      http.delete(`/keycloak/groups/${id}/members/${userId}`),
+  },
+}
 
 // V1 legacy roles table (Viewer/Editor/Admin) — 只读保留。
 // `component_role_bindings` 无 role_id 列（D3），这些角色**不可被绑定**；
