@@ -38,7 +38,8 @@
 
 ## 认证（Keycloak 真对接，2026-09-23 起本地 deploy 默认开启）
 
-- 未登录访问任何受保护路由 → 先进 `/login-hint`（展示预置账号 + 「临时初始密码，登录后须重置」批注）→ 点「继续登录」跳 Keycloak 托管页（Authorization Code + PKCE），回调 `/auth/callback` 后入站。
+- 登录直达：未登录访问任何受保护路由 → router 守卫直接 `auth.login()` 跳 Keycloak 托管登录页（Authorization Code + PKCE），回调 `/auth/callback` 后按 state 回跳原目标路由；认证入口与 Keycloak 之间没有中间页。
+- 首登强制改密闭环：种子/管理员建的临时密码用户在 Keycloak 走 `UPDATE_PASSWORD` required action；auth callback 检测「本次登录刚完成改密」（密码凭证 `createdDate` ≈ token `auth_time`，经用户自身 token 调 Keycloak Account API `/account/credentials?credentialType=password`）→ 主动登出回登录页，用新密码重登。检测失败降级放行（不阻断登录）。
 - 运行时配置经 chart values `auth.*` → ConfigMap `config.js` → `window.__APP_CONFIG__` 注入（`VITE_AUTH_DISABLED=false` + issuer/clientId/redirectUri 与 hub 侧同源，issuer 三方一字不差，详见 `docs/shared/KEYCLOAK.md` §6.5）。dev 旁路 `VITE_AUTH_DISABLED=true` 仍可用。
 - ⚠️ chart 模板对 bool 值做了 `toString` 归一化（helm `--set xxx=false` 解析成 bool，`false | default "true"` 会被 sprig 当零值顶掉——勿回退成裸 `default`）。
 

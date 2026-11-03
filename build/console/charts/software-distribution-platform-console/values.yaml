@@ -61,8 +61,3 @@ auth:
   keycloakIssuerUrl: ""
   keycloakClientId: ""
   keycloakRedirectUri: ""
-  # 登录说明页（/login-hint）展示的预置账号。与 hub chart 的
-  # keycloak-realm-configmap.yaml 预置用户 admin 同源——改密码必须两处同步；
-  # 置空则说明页不展示凭证块（生产建议置空或改成真实初始值）。
-  loginHintUser: "admin"
-  loginHintPassword: "sdp@12345"

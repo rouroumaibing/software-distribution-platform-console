@@ -17,14 +17,6 @@ const router = createRouter({
       meta: { public: true },
     },
     {
-      // 登录说明页：展示预置账号（临时密码批注 + 登录后重置提示），再由用户
-      // 点击「继续登录」跳 Keycloak。meta.public = 未登录也可直达。
-      path: '/login-hint',
-      name: 'login-hint',
-      component: () => import('@/views/LoginHintView.vue'),
-      meta: { public: true, title: '登录说明' },
-    },
-    {
       path: '/',
       component: () => import('@/layout/MainLayout.vue'),
       children: [
@@ -102,16 +94,18 @@ const router = createRouter({
   ],
 })
 
-// 除了标了 meta.public 的路由(登录说明页 / OIDC 回调页),其余一律要求已登录。
-// 未登录先落到 /login-hint(预置账号 + 临时密码说明),由用户点击「继续登录」
-// 再跳 Keycloak 登录页——不直接 signinRedirect,避免错过登录说明。
+// 除了标了 meta.public 的路由(OIDC 回调页),其余一律要求已登录。
+// 登录直达（§7.15.1）：未认证直接 auth.login() 跳 Keycloak 托管登录页，认证入口
+// 与 Keycloak 之间没有任何中间停留；目标路由经 Keycloak state 承载，登录成功后
+// 在 /auth/callback 回跳。
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.initialized) await auth.init()
 
   if (!to.meta.public && !auth.isAuthenticated) {
-    if (to.fullPath === '/') return '/login-hint'
-    return { path: '/login-hint', query: { redirect: to.fullPath } }
+    if (auth.authDisabled) return true
+    await auth.login(to.fullPath)
+    return false
   }
 })
 
