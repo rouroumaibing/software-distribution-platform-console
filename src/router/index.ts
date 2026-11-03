@@ -11,6 +11,13 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      // 自有登录页（AUTH-ARCHITECTURE §9）：state.mode 在 login/updatePassword 间切换
+      path: '/user/login',
+      name: 'user-login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { public: true, title: '登录' },
+    },
+    {
       path: '/auth/callback',
       name: 'auth-callback',
       component: () => import('@/views/AuthCallback.vue'),
@@ -94,19 +101,15 @@ const router = createRouter({
   ],
 })
 
-// 除了标了 meta.public 的路由(OIDC 回调页),其余一律要求已登录。
-// 登录直达（§7.15.1）：未认证直接 auth.login() 跳 Keycloak 托管登录页，认证入口
-// 与 Keycloak 之间没有任何中间停留；目标路由经 Keycloak state 承载，登录成功后
-// 在 /auth/callback 回跳。
+// 未认证访问受保护路由 → 重定向到自有登录页 /user/login（AUTH-ARCHITECTURE §9 /
+// ui-05 §7.15.1）。登录入口与 Keycloak 之间无中间说明页；目标路由经 query.redirect
+// 承载，登录成功后回跳。Flow B 的 SSO 入口由 LoginView 调 GET /api/auth/login-url。
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.initialized) await auth.init()
 
-  if (!to.meta.public && !auth.isAuthenticated) {
-    if (auth.authDisabled) return true
-    await auth.login(to.fullPath)
-    return false
-  }
+  if (to.meta.public || auth.isAuthenticated || auth.authDisabled) return true
+  return { path: '/user/login', query: { redirect: to.fullPath } }
 })
 
 export default router

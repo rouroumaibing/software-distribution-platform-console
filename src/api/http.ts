@@ -8,6 +8,9 @@ import { useAuthStore } from '@/stores/auth'
 const runtimeBase = (window as unknown as { __APP_CONFIG__?: Record<string, string> }).__APP_CONFIG__?.VITE_API_BASE_URL
 export const http = axios.create({
   baseURL: runtimeBase || import.meta.env.VITE_API_BASE_URL || '/api/v1',
+  // BFF 模型（AUTH-ARCHITECTURE.md）：认证凭据是 hub 的 httpOnly session cookie，
+  // 浏览器不持 token。withCredentials 让 axios 同源/跨域都带 cookie。
+  withCredentials: true,
 })
 
 http.interceptors.request.use((config) => {
