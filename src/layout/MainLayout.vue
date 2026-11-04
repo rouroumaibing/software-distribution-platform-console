@@ -117,33 +117,60 @@ interface MenuGroup {
   items: MenuItem[]
 }
 
-// IA v4.4 菜单（§5.1 设计铁律 S5）：**恒 5 项**
-// 3(主区: 总览/服务树/运行中心) + 2(平台管理: 用户与权限/接入管理)。
-// 与 Org/Service/Component 数量无关，也与用户行为无关 —— 资源树、"最近访问"
-// 一律不许进左栏；跨组件直达由顶栏 ⌘K 承担（§5.1.1）。
-const groups: MenuGroup[] = [
-  {
-    items: [
-      { path: '/dashboard', label: '总览', icon: 'grid' },
-      { path: '/service-tree', label: '服务树', icon: 'layers' },
-      { path: '/runs', label: '运行中心', icon: 'play' },
-    ],
-  },
-  {
-    label: '平台管理',
-    items: [
-      { path: '/admin/permissions', label: '用户与权限', icon: 'shield' },
-      { path: '/admin/targets', label: '接入管理', icon: 'cloud' },
-    ],
-  },
-]
+// 菜单由 userinfo 驱动（ACCESS-CONTROL §6：L1 → 平台级菜单树；L2 → 组织作用域菜单）。
+// 主区三项是全部已登录用户可见的恒量；平台管理与组织两组按角色/组织管理员身份
+// 条件渲染。资源树、"最近访问" 仍不许进左栏（§5.1 设计铁律 S5 不变）。
+const visibleGroups = computed<MenuGroup[]>(() => {
+  const g: MenuGroup[] = [
+    {
+      items: [
+        { path: '/dashboard', label: '总览', icon: 'grid' },
+        { path: '/service-tree', label: '服务树', icon: 'layers' },
+        { path: '/runs', label: '运行中心', icon: 'play' },
+      ],
+    },
+  ]
+  // L1：仅 platform-admin 见平台管理面（认证旁路 VITE_AUTH_DISABLED 下可见）。
+  if (auth.authDisabled || auth.roles.includes('platform-admin')) {
+    g.push({
+      label: '平台管理',
+      items: [
+        { path: '/admin/dashboard', label: '管理台', icon: 'grid' },
+        { path: '/admin/permissions', label: '用户与权限', icon: 'shield' },
+        { path: '/admin/cluster-permissions', label: '集群权限', icon: 'shield' },
+        { path: '/admin/targets', label: '接入管理', icon: 'cloud' },
+      ],
+    })
+  }
+  // L2：组织管理员见其管理下的组织入口（每个组织一个工作台链接）。
+  if (auth.orgAdmins.length > 0) {
+    g.push({
+      label: '组织',
+      items: auth.orgAdmins.map((o) => ({
+        path: `/org/dashboard?org=${encodeURIComponent(o)}`,
+        label: o,
+        icon: 'layers' as const,
+      })),
+    })
+  }
+  return g
+})
 
-// 高亮映射：组件详情前缀归服务树，admin 区分两个子项。
+// 高亮映射：组件详情前缀归服务树；admin 区分具体子项（其余 admin 页归管理台）；
+// org 工作台按 ?org= 精确匹配。
 const activePath = computed(() => {
   const p = route.path
   if (p.startsWith('/components/')) return '/service-tree'
-  if (p.startsWith('/admin/permissions')) return '/admin/permissions'
-  if (p.startsWith('/admin/targets')) return '/admin/targets'
+  if (p.startsWith('/admin/')) {
+    if (p === '/admin/dashboard') return '/admin/dashboard'
+    if (p.startsWith('/admin/permissions')) return '/admin/permissions'
+    if (p.startsWith('/admin/cluster-permissions')) return '/admin/cluster-permissions'
+    if (p.startsWith('/admin/targets')) return '/admin/targets'
+    return '/admin/dashboard'
+  }
+  if (p.startsWith('/org/dashboard')) {
+    return `/org/dashboard?org=${String(route.query.org ?? '')}`
+  }
   return '/' + (route.path.split('/')[1] ?? '')
 })
 
@@ -190,7 +217,7 @@ async function logout() {
         </button>
       </div>
       <nav class="rail-body">
-        <template v-for="(g, gi) in groups" :key="gi">
+        <template v-for="(g, gi) in visibleGroups" :key="gi">
           <div v-if="g.label" class="rgroup">{{ g.label }}</div>
           <router-link
             v-for="m in g.items"

@@ -11,6 +11,9 @@ export interface UserInfo {
   groups: string[]
   orgs: string[]
   roles: string[]
+  // L2 组织管理员组织名集合（ACCESS-CONTROL §1.2 / §6）：决定 /org/dashboard 可见性。
+  // 由 hub 从 Keycloak `org_admin` attribute 映射，前端只消费、不解析 token。
+  orgAdmins: string[]
 }
 
 export const userinfoApi = {

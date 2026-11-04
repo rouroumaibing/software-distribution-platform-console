@@ -47,7 +47,8 @@ const devUser: SessionUser = {
   username: 'dev-user',
   groups: [],
   orgs: [],
-  roles: [],
+  roles: ['platform-admin'],
+  orgAdmins: ['acme'],
   profile: { sub: 'dev-user', preferred_username: 'dev-user', name: 'dev-user' },
 }
 
@@ -74,12 +75,12 @@ export const useAuthStore = defineStore('auth', {
 
   getters: {
     isAuthenticated: (state) => !!state.user,
-    // accessToken 恒为 null：BFF 模式下浏览器不持 token，http 客户端靠 cookie
-    // （withCredentials）。保留此 getter 让既有 EventSource 流式调用（agentOp.ts /
-    // run.ts 的 `token ?` 守卫）编译通过——联调时改走 credentials:'include'。
+    // accessToken 恒为 null：BFF 模式下浏览器不持 token，所有请求（含 SSE 流式
+    // fetch）靠 httpOnly cookie 鉴权（axios withCredentials / fetch credentials:'include'）。
     accessToken: () => null as string | null,
     roles: (state) => state.user?.roles ?? [],
     orgs: (state) => state.user?.orgs ?? [],
+    orgAdmins: (state) => state.user?.orgAdmins ?? [],
     authDisabled: () => AUTH_DISABLED,
   },
 

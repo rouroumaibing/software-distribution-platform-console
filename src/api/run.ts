@@ -3,7 +3,6 @@ import { listPaged } from './crud'
 import type { Pagination } from './http'
 import type { PipelineTaskType } from './pipeline'
 import { parseSSERawEvent } from '@/utils/agentOp'
-import { useAuthStore } from '@/stores/auth'
 
 export type PipelineRunPhase =
   | 'Pending'
@@ -172,7 +171,8 @@ export const runApi = {
 
 // ---- 运行级日志 SSE（ui-12 §5.5 / N-27）-------------------------------------
 // GET /runs/:id/log/stream：回放历史 + 增量轮询，run 终态后端发 end 关闭。
-// EventSource 无法带 Authorization 头，与 agentOp 同一手法：fetch 流式读取 +
+// BFF cookie session 模式：fetch 带 credentials:'include' 让 httpOnly cookie
+// 自动随请求；EventSource 无法控制 credentials 故用 fetch 流式读取 +
 // 手动解析（parseSSERawEvent 纯函数复用自 utils/agentOp.ts）。
 
 export interface RunLogStreamHandlers {
@@ -184,14 +184,13 @@ export interface RunLogStreamHandlers {
 /** 订阅一个运行的日志流。返回 AbortController 供组件卸载取消。 */
 export function streamRunLogs(runId: string, handlers: RunLogStreamHandlers): AbortController {
   const ctrl = new AbortController()
-  const token = useAuthStore().accessToken
   const base = (http.defaults.baseURL || '/api/v1').replace(/\/$/, '')
   const url = `${base}/runs/${encodeURIComponent(runId)}/log/stream`
 
   void (async () => {
     try {
       const res = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
         signal: ctrl.signal,
       })
       if (!res.ok || !res.body) {

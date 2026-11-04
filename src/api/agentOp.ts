@@ -1,6 +1,5 @@
 import { http } from './http'
 import type { Envelope, PagedData, Pagination } from './http'
-import { useAuthStore } from '@/stores/auth'
 import {
   agentOpStatusLabel,
   agentOpTypeLabel,
@@ -63,21 +62,20 @@ export interface StreamHandlers {
 }
 
 // SSE 消费端（GET /agent-ops/:id/stream）。
-// hub 鉴权只读 Authorization 头（middleware/auth.go），EventSource 无法带头，
-// 故用 fetch 流式读取 + 手动解析；auth OFF（dev SKIP_AUTH=1）时 token 为空也能用。
+// BFF cookie session 模式：fetch 带 credentials:'include' 让 httpOnly cookie
+// 自动随请求；EventSource 无法控制 credentials 故用 fetch 流式读取 + 手动解析。
 // 解析逻辑在 utils/agentOp.ts（纯函数，供 node 冒烟直接测）。
 
 // 流式订阅单个 op 的输出与状态变更。返回 AbortController 以便组件卸载时取消。
 export function streamAgentOp(id: string, handlers: StreamHandlers): AbortController {
   const ctrl = new AbortController()
-  const token = useAuthStore().accessToken
   const base = (http.defaults.baseURL || '/api/v1').replace(/\/$/, '')
   const url = `${base}/agent-ops/${id}/stream`
 
   void (async () => {
     try {
       const res = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
         signal: ctrl.signal,
       })
       if (!res.ok || !res.body) {

@@ -60,6 +60,12 @@ const router = createRouter({
         // 两视图共用一个路由，切面靠 ?view= 承载（CONSOLE-UI-DESIGN.md 附 B N-13）。
         { path: 'runs', component: () => import('@/views/RunCenterView.vue'), meta: { title: '运行中心' } },
 
+        // ---- 组织工作台（ACCESS-CONTROL §6，L2 守卫）----
+        // /org/dashboard?org=<slug>：当前用户须为 <slug> 的 org_admin（userinfo.orgAdmins
+        // 含该组织名），否则 beforeEach 重定向 /forbidden。无 org 参数时要求至少是一个
+        // 组织的管理员（由页面引导选择具体组织）。
+        { path: 'org/dashboard', component: () => import('@/views/OrgDashboardView.vue'), meta: { title: '组织工作台' } },
+
         // ---- 下钻路由（保持不变）----
         { path: 'pipelines/:id', component: () => import('@/views/PipelineEditorView.vue'), meta: { title: '流水线编排' } },
         { path: 'pipelines/:id/runs', component: () => import('@/views/RunListView.vue'), meta: { title: '运行历史' } },
@@ -67,12 +73,17 @@ const router = createRouter({
         { path: 'releases/:id', component: () => import('@/views/ReleaseDetailView.vue'), meta: { title: '灰度发布' } },
 
         // ---- 平台管理 ----
+        // /admin/dashboard：平台管理面入口（ACCESS-CONTROL §6），L1 守卫
+        // （roles 含 platform-admin）在 beforeEach 统一施加，失败 → /forbidden。
+        { path: 'admin/dashboard', component: () => import('@/views/AdminDashboardView.vue'), meta: { title: '平台管理台' } },
         { path: 'admin/permissions', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'permissions' }, meta: { title: '用户与平台权限' } },
         { path: 'admin/targets', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'targets' }, meta: { title: '接入管理' } },
         { path: 'admin/credentials', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'credentials' }, meta: { title: '凭据管理' } },
         { path: 'admin/audit', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'audit' }, meta: { title: '平台审计日志' } },
         { path: 'admin/settings', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'settings' }, meta: { title: '平台设置' } },
         { path: 'admin/upgrade-approvals', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'upgrade-approvals' }, meta: { title: '升级审批' } },
+        // ACCESS-CONTROL §7 — K8s RBAC 授权层管理页（集群权限），L1 守卫。
+        { path: 'admin/cluster-permissions', component: () => import('@/views/ClusterPermissionsView.vue'), meta: { title: '集群权限' } },
 
         // ---- 全局错误态（STATUS #21）----
         // 403：http 响应拦截器（api/http.ts）统一跳转；也可直达 /forbidden。
@@ -104,11 +115,30 @@ const router = createRouter({
 // 未认证访问受保护路由 → 重定向到自有登录页 /user/login（AUTH-ARCHITECTURE §9 /
 // ui-05 §7.15.1）。登录入口与 Keycloak 之间无中间说明页；目标路由经 query.redirect
 // 承载，登录成功后回跳。Flow B 的 SSO 入口由 LoginView 调 GET /api/auth/login-url。
+//
+// 角色守卫（ACCESS-CONTROL §6）：认证通过后再施加 L1/L2 双层角色校验，失败不回登录
+// （已认证只是无权），直接落到 /forbidden。认证旁路（VITE_AUTH_DISABLED）跳过守卫。
+//   - L1 平台管理面：/admin/* 要求 userinfo.roles 含 platform-admin
+//   - L2 组织工作台：/org/dashboard 要求 userinfo.orgAdmins 含当前组织（?org=）；
+//     无 org 参数时要求至少是一个组织的管理员
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.initialized) await auth.init()
 
-  if (to.meta.public || auth.isAuthenticated || auth.authDisabled) return true
+  if (to.meta.public || auth.isAuthenticated || auth.authDisabled) {
+    if (!to.meta.public && !auth.authDisabled) {
+      if (to.path.startsWith('/admin/') && !auth.roles.includes('platform-admin')) {
+        return { path: '/forbidden' }
+      }
+      if (to.path.startsWith('/org/dashboard')) {
+        const org = (to.query.org as string) || ''
+        if (org ? !auth.orgAdmins.includes(org) : auth.orgAdmins.length === 0) {
+          return { path: '/forbidden' }
+        }
+      }
+    }
+    return true
+  }
   return { path: '/user/login', query: { redirect: to.fullPath } }
 })
 
