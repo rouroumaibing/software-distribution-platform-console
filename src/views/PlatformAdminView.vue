@@ -24,6 +24,7 @@ import { auditApi, type AuditLog, type AuditLogFilter } from '@/api/audit'
 import { platformApi, type ChangeWindow } from '@/api/platform'
 import { agentOpApi, agentOpStatusLabel, agentOpTypeLabel, type AgentOp } from '@/api/agentOp'
 import { http } from '@/api/http'
+import { authApi, type IdentityProvider } from '@/api/auth'
 import { toast } from '@/utils/toast'
 
 // ---- §6.3 平台运维聚合（只读） --------------------------------------------
@@ -150,7 +151,7 @@ import {
   type SubjectType,
 } from '@/utils/permission'
 
-const props = defineProps<{ section: 'permissions' | 'targets' | 'credentials' | 'audit' | 'settings' | 'upgrade-approvals' }>()
+const props = defineProps<{ section: 'permissions' | 'targets' | 'credentials' | 'audit' | 'settings' | 'upgrade-approvals' | 'auth' }>()
 
 const roles = ref<PlatformRole[]>([]) // §7.2 平台角色（C-10，可管理）
 const bindings = ref<PlatformRoleBinding[]>([]) // 平台级绑定（C-10，可管理）
@@ -210,6 +211,8 @@ onMounted(async () => {
       await loadChangeWindow()
     } else if (props.section === 'upgrade-approvals') {
       await loadUpgradeApprovals()
+    } else if (props.section === 'auth') {
+      await loadAuthSettings()
     }
     // section === 'credentials' → <CredentialsView/> 自行加载，这里无需取数
   } finally {
@@ -736,12 +739,143 @@ async function copyJoin(part: 'script' | 'env') {
   if (await copyText(text)) joinCopied.value = part
   else toast.err('复制失败，请手动选择文本复制')
 }
+
+// ---------------------------------------------------------------------------
+// 认证设置（AUTH-ARCHITECTURE §2 / §5）：协议层登录模式 + 身份提供商目录。
+// 两者都经 realmsettings 端点（hub 代理 Keycloak + DB 持久化 login 模式），
+// 需平台级 user:manage（与 platformGroup 守卫同口径）。KC 未配置时端点缺失，
+// loadAuthSettings 静默留空，不阻断页面。
+// ---------------------------------------------------------------------------
+const authLoginMode = ref<'default' | 'keycloak'>('default')
+const authModeSaving = ref(false)
+const authIdpTypes = ref<string[]>([])
+const authIdps = ref<IdentityProvider[]>([])
+
+async function loadAuthSettings() {
+  try {
+    const [cfg, types, idps] = await Promise.all([
+      authApi.authConfig(),
+      authApi.listIDPTypes(),
+      authApi.listIDP(),
+    ])
+    authLoginMode.value = cfg.login
+    authIdpTypes.value = types.types
+    authIdps.value = idps.identityProviders ?? []
+  } catch {
+    // 端点缺失（KC 未配置）→ 留空，不阻断页面。
+  }
+}
+
+async function saveLoginMode() {
+  authModeSaving.value = true
+  try {
+    const saved = await authApi.setLoginMode(authLoginMode.value)
+    authLoginMode.value = saved.login
+    toast.ok(saved.login === 'keycloak' ? '已切换为单点登录（Keycloak）' : '已切换为自研账号登录')
+    await loadAuthSettings()
+  } catch (e) {
+    const st = (e as { response?: { status?: number } })?.response?.status
+    toast.err(st === 409 ? '已有启用的身份提供商，无法切回自研账号登录（SSO 用户会失联）' : failMsg(e))
+  } finally {
+    authModeSaving.value = false
+  }
+}
+
+// ---- 身份提供商 CRUD ----
+const idpModal = ref(false)
+const idpSaving = ref(false)
+const idpEditAlias = ref<string | null>(null)
+const idpForm = reactive<{ alias: string; displayName: string; providerId: string; enabled: boolean; trustEmail: boolean; configText: string }>({
+  alias: '',
+  displayName: '',
+  providerId: '',
+  enabled: true,
+  trustEmail: false,
+  configText: '',
+})
+
+// 配置以 `key=value` 行编辑（忽略空行 / 无 `=` 行），提交时转 Record<string,string>。
+function parseIdpConfig(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line || !line.includes('=')) continue
+    const i = line.indexOf('=')
+    out[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+  }
+  return out
+}
+function configToText(cfg?: Record<string, string>): string {
+  if (!cfg) return ''
+  return Object.entries(cfg).map(([k, v]) => `${k}=${v}`).join('\n')
+}
+
+function openCreateIdp() {
+  idpEditAlias.value = null
+  idpForm.alias = ''
+  idpForm.displayName = ''
+  idpForm.providerId = authIdpTypes.value[0] ?? 'oidc'
+  idpForm.enabled = true
+  idpForm.trustEmail = false
+  idpForm.configText = ''
+  idpModal.value = true
+}
+function openEditIdp(idp: IdentityProvider) {
+  idpEditAlias.value = idp.alias
+  idpForm.alias = idp.alias
+  idpForm.displayName = idp.displayName ?? ''
+  idpForm.providerId = idp.providerId
+  idpForm.enabled = idp.enabled
+  idpForm.trustEmail = idp.trustEmail ?? false
+  idpForm.configText = configToText(idp.config)
+  idpModal.value = true
+}
+async function saveIdp() {
+  if (!idpForm.alias.trim()) {
+    toast.err('请填写别名（alias）')
+    return
+  }
+  if (!idpForm.providerId) {
+    toast.err('请选择提供商类型')
+    return
+  }
+  idpSaving.value = true
+  try {
+    const payload: IdentityProvider = {
+      alias: idpForm.alias.trim(),
+      displayName: idpForm.displayName.trim(),
+      providerId: idpForm.providerId,
+      enabled: idpForm.enabled,
+      trustEmail: idpForm.trustEmail,
+      config: parseIdpConfig(idpForm.configText),
+    }
+    if (idpEditAlias.value) await authApi.updateIDP(idpEditAlias.value, payload)
+    else await authApi.createIDP(payload)
+    toast.ok(idpEditAlias.value ? '已更新身份提供商' : '已创建身份提供商')
+    idpModal.value = false
+    await loadAuthSettings()
+  } catch (e) {
+    toast.err(failMsg(e))
+  } finally {
+    idpSaving.value = false
+  }
+}
+async function deleteIdp(idp: IdentityProvider) {
+  if (!window.confirm(`删除身份提供商「${idp.alias}」？已通过该 IdP 登录的用户将无法通过此入口登录。`)) return
+  try {
+    await authApi.deleteIDP(idp.alias)
+    toast.ok('已删除身份提供商')
+    await loadAuthSettings()
+  } catch (e) {
+    toast.err(failMsg(e))
+  }
+}
 </script>
 
 <template>
   <div>
     <div class="page-head">
-      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : section === 'targets' ? '接入管理' : section === 'audit' ? '平台审计日志' : section === 'upgrade-approvals' ? '升级审批' : '凭据管理' }}</h1>
+      <h1 class="title">{{ section === 'permissions' ? '用户与平台权限' : section === 'targets' ? '接入管理' : section === 'audit' ? '平台审计日志' : section === 'upgrade-approvals' ? '升级审批' : section === 'auth' ? '认证设置' : '凭据管理' }}</h1>
       <div class="sub" v-if="section === 'credentials'">
         凭据注册与加密存储：hub 侧 AES-GCM 信封加密，明文不回流 console（仅创建/修改请求携带）。
       </div>
@@ -762,6 +896,7 @@ async function copyJoin(part: 'script' | 'env') {
       <router-link class="tab" :class="{ active: section === 'audit' }" to="/admin/audit">审计日志</router-link>
       <router-link class="tab" :class="{ active: section === 'settings' }" to="/admin/settings">平台设置</router-link>
       <router-link class="tab" :class="{ active: section === 'upgrade-approvals' }" to="/admin/upgrade-approvals">升级审批</router-link>
+      <router-link class="tab" :class="{ active: section === 'auth' }" to="/admin/auth">认证设置</router-link>
     </div>
 
     <!-- §5.1 变更窗口（平台级特性开关）：开启后仅窗口内可触发新运行。
@@ -1219,6 +1354,106 @@ async function copyJoin(part: 'script' | 'env') {
         批准即把升级 op 置为可派发并下发给目标 Runner；驳回直接关闭且不派发。超过 24 小时无人处理的待审批项会被定时任务自动驳回。
       </p>
     </template>
+
+    <!-- AUTH-ARCHITECTURE §2 / §5：协议层登录模式（default/keycloak）+ 身份提供商目录 -->
+    <template v-else-if="section === 'auth'">
+      <div class="card" style="max-width: 720px">
+        <h2 class="h2" style="margin: 0 0 10px">登录模式</h2>
+        <p class="muted" style="margin-top: 0">
+          协议层登录入口：<strong>自研账号登录</strong>（default）= 平台自持用户名/密码表单，无 SSO；
+          <strong>单点登录</strong>（keycloak）= 跳转 Keycloak 走 OIDC，带企业 SSO。两者互斥；
+          身份存储层恒为 Keycloak（用户目录不迁移）。
+        </p>
+        <div class="field" style="margin-bottom: 12px">
+          <div class="seg">
+            <label :class="{ active: authLoginMode === 'default' }">
+              <input type="radio" value="default" v-model="authLoginMode" /> 自研账号登录
+            </label>
+            <label :class="{ active: authLoginMode === 'keycloak' }">
+              <input type="radio" value="keycloak" v-model="authLoginMode" /> 单点登录（Keycloak）
+            </label>
+          </div>
+        </div>
+        <p class="muted" v-if="authLoginMode === 'default'">
+          切回自研账号前需先停用全部身份提供商，否则已通过 SSO 登录的用户会失联。
+        </p>
+        <button class="btn btn-primary" :disabled="authModeSaving" @click="saveLoginMode">
+          {{ authModeSaving ? '保存中…' : '保存登录模式' }}
+        </button>
+      </div>
+
+      <!-- 身份提供商目录 -->
+      <div class="toolbar" style="margin-top: 22px">
+        <h2 class="h2" style="margin: 0">身份提供商（SSO）</h2>
+        <div class="spacer"></div>
+        <button class="btn btn-pearl" @click="openCreateIdp">＋ 新建身份提供商</button>
+      </div>
+      <div class="card flush">
+        <div v-if="authIdps.length === 0" class="empty">暂无身份提供商（未配置 SSO）</div>
+        <table v-else class="table">
+          <thead>
+            <tr>
+              <th>别名</th>
+              <th>显示名</th>
+              <th>类型</th>
+              <th>状态</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="idp in authIdps" :key="idp.alias">
+              <td class="mono">{{ idp.alias }}</td>
+              <td>{{ idp.displayName || '—' }}</td>
+              <td><span class="chip">{{ idp.providerId }}</span></td>
+              <td>
+                <span class="badge" :class="idp.enabled ? 'b-succ' : 'b-pend'">
+                  <span class="pt"></span>{{ idp.enabled ? '启用' : '停用' }}
+                </span>
+              </td>
+              <td class="row-actions">
+                <a @click="openEditIdp(idp)">编辑</a>
+                <a style="color: var(--failed-fg)" @click="deleteIdp(idp)">删除</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <!-- 身份提供商 编辑/新建 -->
+    <Modal :open="idpModal" :title="idpEditAlias ? '编辑身份提供商' : '新建身份提供商'" :width="640" @close="idpModal = false">
+      <div class="field">
+        <label>别名（alias）</label>
+        <input v-model="idpForm.alias" class="input" type="text" placeholder="如 oidc-corp / saml-adfs" :disabled="!!idpEditAlias" />
+        <p class="hint">创建后不可修改；用于登录回调与 KC realm 内唯一标识。</p>
+      </div>
+      <div class="field">
+        <label>显示名</label>
+        <input v-model="idpForm.displayName" class="input" type="text" placeholder="可选，如 企业微信 / 微软 AD" />
+      </div>
+      <div class="field">
+        <label>提供商类型</label>
+        <select v-model="idpForm.providerId" class="select">
+          <option v-for="t in authIdpTypes" :key="t" :value="t">{{ t }}</option>
+        </select>
+        <p class="hint" v-if="authIdpTypes.length === 0">未取到 KC 支持的提供商类型列表，可手填常见值（oidc / saml / cas）。</p>
+      </div>
+      <div class="field">
+        <label class="chk"><input type="checkbox" v-model="idpForm.enabled" /> 启用</label>
+        <label class="chk"><input type="checkbox" v-model="idpForm.trustEmail" /> 信任该 IdP 的邮箱（Trust Email）</label>
+      </div>
+      <div class="field">
+        <label>配置（每行 <code>key=value</code>）</label>
+        <textarea v-model="idpForm.configText" class="input" rows="7" placeholder="clientId=xxx&#10;clientSecret=yyy&#10;baseUrl=https://idp.example.com"></textarea>
+        <p class="hint">透传 Keycloak 的 IdP config（oidc/saml/cas 各自的字段各异）；hub 不重解释，原样回写 KC。</p>
+      </div>
+      <template #foot>
+        <button class="btn btn-pearl" @click="idpModal = false">取消</button>
+        <button class="btn btn-primary" :disabled="idpSaving" @click="saveIdp">
+          {{ idpSaving ? '保存中…' : '保存' }}
+        </button>
+      </template>
+    </Modal>
 
     <!-- M1 新建用户 -->
     <Modal :open="userModal" title="新建用户" @close="userModal = false">

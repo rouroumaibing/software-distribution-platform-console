@@ -14,7 +14,7 @@ service:
 
 image:
   imageAddr: harbor.sdpworkflow.com/sdp/software-distribution-platform-console:v0.0.1
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
   imagePullSecrets: default-secret
 
 resources:

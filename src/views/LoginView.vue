@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore, AuthError } from '@/stores/auth'
+import { authApi } from '@/api/auth'
 
-// 自有登录页（AUTH-ARCHITECTURE.md §9 / ui-05 §7.15.1）：
-// - state.mode = login：用户名 + 密码 → POST /api/auth/login
-//   - 200 → 入系统
-//   - 400 reason=UPDATE_PASSWORD → 切 updatePassword 模式（URL 不变）
-//   - 401 → 凭据无效提示
-// - state.mode = updatePassword：原密码 + 新密码 + 确认 → POST /api/auth/password
-//   - 200 → 切回 login 模式，提示用新密码登录
-// - 「SSO 登录」走 Flow B：GET /api/auth/login-url → 跳 KC 托管页
+// 自有登录页（AUTH-ARCHITECTURE.md §9 / ui-05 §7.15.1）：协议层 login 模式
+// （GET /api/auth/config，未登录态可读）决定入口形态 —— 单一入口，废弃旧版
+// 「登录 + SSO 登录」双按钮：
+// - default：自研用户名 + 密码表单（Flow A）→ POST /api/auth/login
+//     - 200 → 入系统
+//     - 400 reason=UPDATE_PASSWORD → 切 updatePassword 模式（URL 不变）
+//     - 401 → 凭据无效提示
+// - keycloak：OIDC code 流（Flow B，带 SSO）→ 页面挂载即取 KC 登录 URL 并跳转，
+//     表单不渲染（强制改密等由 Keycloak 自身承接）。
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
@@ -22,6 +24,21 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const errorMsg = ref('')
 const loading = ref(false)
+const redirecting = ref(false)
+
+onMounted(async () => {
+  try {
+    const cfg = await authApi.authConfig()
+    if (cfg.login === 'keycloak') {
+      redirecting.value = true
+      const { loginUrl } = await auth.getLoginUrl()
+      window.location.assign(loginUrl)
+    }
+  } catch {
+    // 取配置 / 取 KC URL 失败 → 退化到自研表单，避免登录页卡死。
+    redirecting.value = false
+  }
+})
 
 async function onLogin() {
   errorMsg.value = ''
@@ -73,16 +90,6 @@ async function onChangePassword() {
     loading.value = false
   }
 }
-
-async function onSSO() {
-  errorMsg.value = ''
-  try {
-    const { loginUrl } = await auth.getLoginUrl()
-    window.location.assign(loginUrl)
-  } catch {
-    errorMsg.value = '无法发起 SSO 登录，请重试'
-  }
-}
 </script>
 
 <template>
@@ -90,24 +97,26 @@ async function onSSO() {
     <div class="login-card">
       <h2>SDP 软件分发平台</h2>
 
-      <div v-if="auth.mode === 'login'">
-        <form @submit.prevent="onLogin">
-          <input v-model="username" placeholder="用户名" autocomplete="username" required />
-          <input v-model="password" type="password" placeholder="密码" autocomplete="current-password" required />
-          <button type="submit" :disabled="loading">登录</button>
-        </form>
-        <button class="sso-btn" @click="onSSO" :disabled="loading">SSO 登录</button>
-      </div>
+      <div v-if="redirecting" class="hint">正在跳转到单点登录…</div>
 
-      <div v-else>
-        <p class="hint">设置新密码</p>
-        <form @submit.prevent="onChangePassword">
-          <input v-model="oldPassword" type="password" placeholder="原密码" autocomplete="current-password" required />
-          <input v-model="newPassword" type="password" placeholder="新密码" autocomplete="new-password" required />
-          <input v-model="confirmPassword" type="password" placeholder="确认新密码" autocomplete="new-password" required />
-          <button type="submit" :disabled="loading">提交</button>
-        </form>
-      </div>
+      <template v-else>
+        <div v-if="auth.mode === 'login'">
+          <form @submit.prevent="onLogin">
+            <input v-model="username" placeholder="用户名" autocomplete="username" required />
+            <input v-model="password" type="password" placeholder="密码" autocomplete="current-password" required />
+            <button type="submit" :disabled="loading">登录</button>
+          </form>
+        </div>
+
+        <div v-else>
+          <p class="hint">设置新密码</p>
+          <form @submit.prevent="onChangePassword">
+            <input v-model="newPassword" type="password" placeholder="新密码" autocomplete="new-password" required />
+            <input v-model="confirmPassword" type="password" placeholder="确认新密码" autocomplete="new-password" required />
+            <button type="submit" :disabled="loading">提交</button>
+          </form>
+        </div>
+      </template>
 
       <p v-if="errorMsg" class="error">{{ errorMsg }}</p>
     </div>
@@ -155,12 +164,6 @@ button {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-.sso-btn {
-  margin-top: 8px;
-  background: #fff;
-  color: #1976d2;
-  border: 1px solid #1976d2;
 }
 .hint {
   color: #666;

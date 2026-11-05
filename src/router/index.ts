@@ -82,6 +82,8 @@ const router = createRouter({
         { path: 'admin/audit', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'audit' }, meta: { title: '平台审计日志' } },
         { path: 'admin/settings', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'settings' }, meta: { title: '平台设置' } },
         { path: 'admin/upgrade-approvals', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'upgrade-approvals' }, meta: { title: '升级审批' } },
+        // AUTH-ARCHITECTURE §5 — 认证设置（登录模式 + 身份提供商），L1 守卫。
+        { path: 'admin/auth', component: () => import('@/views/PlatformAdminView.vue'), props: { section: 'auth' }, meta: { title: '认证设置' } },
         // ACCESS-CONTROL §7 — K8s RBAC 授权层管理页（集群权限），L1 守卫。
         { path: 'admin/cluster-permissions', component: () => import('@/views/ClusterPermissionsView.vue'), meta: { title: '集群权限' } },
 
