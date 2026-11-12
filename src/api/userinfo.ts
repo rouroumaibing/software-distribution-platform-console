@@ -4,7 +4,7 @@ import { http, type Envelope } from './http'
 // 前端授权相关展示（角色 / 组织）的唯一真相源，禁止读 token 的 realm_access。
 // 端点 GET /api/v1/userinfo（handler 注册于 /api/v1 组），鉴权后返回当前主体
 // 的身份 + 平台角色 + 组织归属。身份四字段（name/username/email/sub）仍由
-// oidc-client-ts 的 profile 提供，本端点仅补充/对齐授权展示数据。
+// 授权展示数据由本 userinfo 端点聚合返回（角色/绑定等），遵循 OIDC 标准 profile 字段，不再依赖 oidc-client-ts。
 export interface UserInfo {
   subject: string
   username?: string

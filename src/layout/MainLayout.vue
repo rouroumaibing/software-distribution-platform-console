@@ -180,7 +180,7 @@ const userName = computed(() => {
 })
 
 // ---- 个人中心（§7.1 顶栏账户区）：轻量下拉，展示当前会话的身份信息 ----
-// 身份四字段（name/username/email/sub）来自 oidc-client-ts 的 profile（OIDC 标准）；
+// 身份四字段（name/username/email/sub）遵循 OIDC 标准 profile 字段，由 userinfo 端点聚合返回，不再依赖 oidc-client-ts；
 // 授权相关展示（平台角色）来自 hub /api/userinfo（auth.userinfo），不读 token realm_access。
 const profileOpen = ref(false)
 const profile = computed(() => {
