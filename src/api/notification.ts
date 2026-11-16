@@ -20,10 +20,15 @@ export interface NotificationList {
 // markRead 推进 hub 侧游标（只前进不回退）。旧 hub 无 read-mark 端点时
 // markRead 请求 404/503，前端自动回退 localStorage 游标。
 export const notificationApi = {
-  list: () =>
-    http
-      .get<NotificationList & { data: Notification[] }>('/notifications')
-      .then((r) => r.data),
+  list: (): Promise<NotificationList> =>
+    http.get<{ data: NotificationList }>('/notifications').then((r) => {
+      const payload = r.data?.data
+      return {
+        data: Array.isArray(payload?.data) ? payload.data : [],
+        total: typeof payload?.total === 'number' ? payload.total : 0,
+        unreadCount: typeof payload?.unreadCount === 'number' ? payload.unreadCount : undefined,
+      }
+    }),
   markRead: (readAt?: string) =>
     http.post('/notifications/read-mark', readAt ? { readAt } : {}).catch(() => undefined),
 }
