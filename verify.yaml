@@ -1,0 +1,19 @@
+# console verify 资产（声明式 manifest，schema 见 harness-workflow schemas.md）。
+# 给出怎么 build、怎么起、done 长什么样；done 判据机器可判定，不接受"看起来正常"。
+
+schema_version: 1
+build: "pnpm build"
+start: "pnpm dev --host 127.0.0.1"
+done:
+  - command: "pnpm typecheck"
+    evidence: "evidence/typecheck.log"
+  - command: "pnpm test"
+    evidence: "evidence/smoke.log"
+  - command: "pnpm build"
+    evidence: "evidence/build.log"
+  - command: "pnpm test:e2e"
+    evidence: "evidence/*/manifest.json"
+hands:
+  driver: "scripts/e2e-verify.mjs 自启 Vite+Chrome 经 CDP 驱动真实页面（hands and eyes）；scripts/*.mjs 契约冒烟 import 真实源码作 cheap checks"
+  feature_map: "e2e-verify.mjs 的 FLOW 五页（dashboard/service-tree/runs/admin-targets/forbidden）逐页 DOM+截图+网络证据即 rubric；八套 smoke 为 cheap 层"
+timeout_s: 600

@@ -29,3 +29,9 @@ output/
 .idea/
 .vscode/
 *.swp
+
+# ===== E2E 运行时证据（生成物；视觉基线例外入库）=====
+# evidence/ 下带时间戳的截图、响应与日志是运行时产物，不入库；
+# 浏览器会话驻留脚本临时 profile，不落 evidence/。
+/evidence/*
+!/evidence/baseline/

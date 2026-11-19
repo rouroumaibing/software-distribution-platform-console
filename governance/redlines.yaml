@@ -1,0 +1,38 @@
+# console 项目机器判据（harness-workflow audit/scripts/ 从这里读取）。
+# GOVERNANCE_DIR 指向 governance/ 时生效；每段按项目实际调整，调整属配置变更须人审。
+# 本文件是起步最小集，不是权威策略。
+
+schema_version: 1
+
+forbidden_words: [适当, 尽量, 等等, 大概, 合理, 关键, 重要, 必要时]
+
+risk_patterns:
+  - path_glob: "**/auth/**"
+  - path_glob: "**/permission/**"
+  - path_glob: "**/secrets/**"
+  - pattern: '\b(GRANT|REVOKE)\b'
+    skip_paths: &not_prose ["**/*.md", "**/*.txt", "**/*.rst"]
+  - pattern: '\b(DELETE\s+FROM|DROP\s+TABLE|TRUNCATE)\b'
+    skip_paths: *not_prose
+
+ai_writable_paths:
+  - "docs/"
+  - "ai-reports/"
+
+thresholds:
+  ai_writable_max_bytes: 65536
+  # R-VER-008 验证戳覆盖率（先 observe：覆盖率从 0 起，转 enforce 前须补齐）。
+  verification_stamp:
+    lookback: 50
+    min_ratio: 0.8
+  # E-05：同一门禁连续失败达此次数即停止重试转人。
+  max_consecutive_gate_failures: 3
+
+# 服务端强制项（分支保护 / required check / CODEOWNERS）由工程在平台侧配置；
+# 本地 hook 只做快速反馈，不单独作为"已实装"依据。
+protected_paths:
+  - "governance/**"
+  - ".github/workflows/**"
+review_required_paths:
+  - "src/utils/permission.ts"
+  - "src/utils/credential.ts"
