@@ -91,8 +91,9 @@ export const runApi = {
 
   get: (id: string) => http.get<{ data: PipelineRun }>(`/runs/${id}`).then((r) => r.data.data),
 
-  listByPipeline: (pipelineId: string, p?: Pagination) =>
-    listPaged<PipelineRun>(`/pipelines/${pipelineId}/runs`, p),
+  // skip403Redirect 透传：dashboard 等调用方需就地呈现 403 错误态时用。
+  listByPipeline: (pipelineId: string, p?: Pagination, cfg?: { skip403Redirect?: boolean }) =>
+    listPaged<PipelineRun>(`/pipelines/${pipelineId}/runs`, p, undefined, cfg),
 
   // 全局运行列表（运行中心）：跨 pipeline 巡视，phase / componentId / createdAfter /
   // triggeredBy 均为可选过滤（createdAfter = ISO 时间戳，只返回该时刻之后的运行，hub 端点已支持）。

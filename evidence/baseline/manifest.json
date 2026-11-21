@@ -1,0 +1,86 @@
+{
+  "baselines": {
+    "dashboard": {
+      "id": "dashboard",
+      "path": "/dashboard",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "080425bbcc468868e0b9c1f5ef008fe8d350467052883b731674ae7377696b52",
+      "stableAt": "document.fonts.ready + 2 rAF + 400ms",
+      "driver": "headless-chrome-cdp",
+      "capturedAt": "2026-11-20T08:53:55.503Z",
+      "confirmedBy": null,
+      "diff_metric": 0,
+      "baseline_sha256": "080425bbcc468868e0b9c1f5ef008fe8d350467052883b731674ae7377696b52",
+      "actual_sha256": "080425bbcc468868e0b9c1f5ef008fe8d350467052883b731674ae7377696b52"
+    },
+    "service-tree": {
+      "id": "service-tree",
+      "path": "/service-tree",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "cebdba1501835cbd1843bf2fb49ed418035014adacb535e4ed6179db733e5b53",
+      "stableAt": "document.fonts.ready + 2 rAF + 400ms",
+      "driver": "headless-chrome-cdp",
+      "capturedAt": "2026-11-20T08:53:56.182Z",
+      "confirmedBy": null,
+      "diff_metric": 0,
+      "baseline_sha256": "cebdba1501835cbd1843bf2fb49ed418035014adacb535e4ed6179db733e5b53",
+      "actual_sha256": "cebdba1501835cbd1843bf2fb49ed418035014adacb535e4ed6179db733e5b53"
+    },
+    "run-center-runs": {
+      "id": "run-center-runs",
+      "path": "/runs?view=runs",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "f997052f253663e7b9cb54a5082c9d3dd59da3843d4b476c6aed5e06e6f0db78",
+      "stableAt": "document.fonts.ready + 2 rAF + 400ms",
+      "driver": "headless-chrome-cdp",
+      "capturedAt": "2026-11-20T08:53:56.772Z",
+      "confirmedBy": null,
+      "diff_metric": 0,
+      "baseline_sha256": "f997052f253663e7b9cb54a5082c9d3dd59da3843d4b476c6aed5e06e6f0db78",
+      "actual_sha256": "f997052f253663e7b9cb54a5082c9d3dd59da3843d4b476c6aed5e06e6f0db78"
+    },
+    "run-center-releases": {
+      "id": "run-center-releases",
+      "path": "/runs?view=releases",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "c7c52535fb23af9411be7cd1d982f24d3c2af96081ee6b1ff362eacd273957fa",
+      "stableAt": "document.fonts.ready + 2 rAF + 400ms",
+      "driver": "headless-chrome-cdp",
+      "capturedAt": "2026-11-20T08:53:57.339Z",
+      "confirmedBy": null,
+      "diff_metric": 0,
+      "baseline_sha256": "c7c52535fb23af9411be7cd1d982f24d3c2af96081ee6b1ff362eacd273957fa",
+      "actual_sha256": "c7c52535fb23af9411be7cd1d982f24d3c2af96081ee6b1ff362eacd273957fa"
+    },
+    "admin-targets": {
+      "id": "admin-targets",
+      "path": "/admin/targets",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "ecd8600869600add871aa53fa2116a52ff4277d49296121da934de480c1545ce",
+      "stableAt": "document.fonts.ready + 2 rAF + 400ms",
+      "driver": "headless-chrome-cdp",
+      "capturedAt": "2026-11-20T08:53:57.966Z",
+      "confirmedBy": null,
+      "diff_metric": 1,
+      "baseline_sha256": "c24ff288972522c36620132ffe75614b19546a1ae2b442bea0fdd1061a3579f9",
+      "actual_sha256": "9b635b1b6c29d17d466f918379b4819251f0a8512b5c0e249430983154fa95cb"
+    }
+  },
+  "tolerance": 0.02,
+  "note": "首版基线由脚本生成，confirmedBy 为 null 待人审确认后填写；比对为字节级 sha256，像素差指标待接入像素库。volatile 场景只记录 diff 供人审。"
+}

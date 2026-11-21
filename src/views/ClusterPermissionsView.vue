@@ -43,7 +43,8 @@ async function load() {
   try {
     const [bs, envs] = await Promise.all([
       clusterPermissionApi.list().catch(() => [] as ClusterBinding[]),
-      listPaged<Environment>('/environments').catch(() => ({ items: [] as Environment[] })),
+      // 环境下拉需全部可选项：默认分页（pageSize=20）会在环境增多后把选项挤出，导致无法新建绑定。
+      listPaged<Environment>('/environments', { page: 1, pageSize: 1000 }).catch(() => ({ items: [] as Environment[] })),
     ])
     bindings.value = bs.map((x) => ({ ...x }))
     environments.value = envs.items ?? []

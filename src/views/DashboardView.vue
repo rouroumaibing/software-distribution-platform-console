@@ -1,6 +1,5 @@
 <script setup lang="ts">
 // F2 总览：KPI + 异常 Runner 提示 + 最近运行(CONSOLE-LAYOUT §3.1)。
-// 后端无全局 runs 端点,最近运行取第一个流水线的前 5 条。
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -11,6 +10,7 @@ import { componentApi } from '@/api/component'
 import { pipelineApi } from '@/api/pipeline'
 import { runApi, type PipelineRun } from '@/api/run'
 import { environmentApi } from '@/api/environment'
+import { isAxiosStatus } from '@/api/http'
 
 const router = useRouter()
 const targets = ref<Target[]>([])
@@ -19,10 +19,17 @@ const pipelineNameMap = ref<Record<string, string>>({})
 const runCount = ref(0)
 const envCount = ref(0)
 const loading = ref(true)
+const errorState = ref('')
 
 const onlineTargets = () => targets.value.filter((c) => c.status === 'online').length
 
-onMounted(async () => {
+async function load() {
+  errorState.value = ''
+  loading.value = true
+  recentRuns.value = []
+  pipelineNameMap.value = {}
+  runCount.value = 0
+  envCount.value = 0
   try {
     const cp = await targetApi.list({ page: 1, pageSize: 100 })
     targets.value = cp.items
@@ -40,7 +47,8 @@ onMounted(async () => {
           const pls = await pipelineApi.listByComponent(c.id, { page: 1, pageSize: 20 })
           for (const p of pls.items) {
             pipelineNameMap.value[p.id] = `${c.name} / ${p.name}`
-            const runs = await runApi.listByPipeline(p.id, { page: 1, pageSize: 5 })
+            // 403 就地呈现（ui-05 §7.9）：单请求豁免 http 拦截器的全局跳页。
+            const runs = await runApi.listByPipeline(p.id, { page: 1, pageSize: 5 }, { skip403Redirect: true })
             runCount.value += runs.total
             for (const r of runs.items) recentRuns.value.push(r)
           }
@@ -49,10 +57,17 @@ onMounted(async () => {
       recentRuns.value.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
       recentRuns.value = recentRuns.value.slice(0, 5)
     }
+  } catch (e) {
+    // 错误态就地呈现，不回落空态（五态规范 §1；ui-05 §7.9「不伪装成无用户」）。
+    errorState.value = isAxiosStatus(e, 403)
+      ? '操作被拒绝（403）：没有查看运行的权限，请申请组件管理员角色。'
+      : '加载失败：暂时无法获取运行数据，请重试。'
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(load)
 
 function fmtTime(s?: string) {
   return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '—'
@@ -100,7 +115,10 @@ function duration(r: PipelineRun) {
 
     <h2 class="h2">最近运行</h2>
     <div class="card flush">
-      <div v-if="loading" class="loading">加载中…</div>
+      <div v-if="errorState" class="err-box">
+        ⚠ {{ errorState }} <button class="link-btn" @click="load">重试</button>
+      </div>
+      <div v-else-if="loading" class="loading">加载中…</div>
       <div v-else-if="recentRuns.length === 0" class="empty">暂无运行记录。到流水线页触发第一次运行。</div>
       <table v-else class="table">
         <thead>
